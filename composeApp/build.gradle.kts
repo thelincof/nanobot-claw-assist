@@ -84,8 +84,8 @@ android {
         applicationId = "com.nanobot.client"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
     }
 
     buildFeatures { compose = true }
@@ -112,7 +112,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Deb, TargetFormat.AppImage)
             packageName = "clawd"
-            packageVersion = "0.1.0"
+            packageVersion = "0.1.1"
             description = "Clawd gateway client"
             vendor = "clawd"
             linux {

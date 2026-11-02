@@ -19,10 +19,10 @@
 
 | Файл | Архитектура |
 |---|---|
-| `Clawd-0.1.0-arm64-v8a.apk` | большинство современных телефонов |
-| `Clawd-0.1.0-armeabi-v7a.apk` | старые 32-битные устройства |
-| `Clawd-0.1.0-x86_64.apk` | эмуляторы Android |
-| `Clawd-0.1.0-universal.apk` | если не знаете архитектуру |
+| `Clawd-0.1.1-arm64-v8a.apk` | большинство современных телефонов |
+| `Clawd-0.1.1-armeabi-v7a.apk` | старые 32-битные устройства |
+| `Clawd-0.1.1-x86_64.apk` | эмуляторы Android |
+| `Clawd-0.1.1-universal.apk` | если не знаете архитектуру |
 
 - Android 8.0 и новее.
 - Нужен работающий шлюз Nanobot 0.3.5+ (WebUI, обычно порт `8765`).
@@ -32,8 +32,8 @@
 
 | Файл | Формат |
 |---|---|
-| `Clawd-0.1.0-x86_64.AppImage` | portable, не требует установки |
-| `Clawd-0.1.0-amd64.deb` | Debian / Ubuntu / Mint |
+| `Clawd-0.1.1-x86_64.AppImage` | portable, не требует установки |
+| `Clawd-0.1.1-amd64.deb` | Debian / Ubuntu / Mint |
 
 Сборки для Linux — x86_64 (amd64).
 
@@ -50,14 +50,14 @@
 AppImage:
 
 ```bash
-chmod +x Clawd-0.1.0-x86_64.AppImage
-./Clawd-0.1.0-x86_64.AppImage
+chmod +x Clawd-0.1.1-x86_64.AppImage
+./Clawd-0.1.1-x86_64.AppImage
 ```
 
 Debian/Ubuntu:
 
 ```bash
-sudo apt install ./Clawd-0.1.0-amd64.deb
+sudo apt install ./Clawd-0.1.1-amd64.deb
 clawd
 ```
 
@@ -138,4 +138,4 @@ Clawd можно назначить цифровым помощником:
 
 ## Версия
 
-**0.1.0** — первый публичный релиз.
+**0.1.1** — исправления списка воркспейсов и удаление воркспейсов в клиенте.
