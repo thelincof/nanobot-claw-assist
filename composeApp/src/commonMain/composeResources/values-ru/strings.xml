@@ -129,6 +129,10 @@
     <string name="workspace_name">Название</string>
     <string name="workspace_path">Путь на gateway (например /home/user/project)</string>
     <string name="workspace_pick_folder">Выбрать папку на сервере…</string>
+    <string name="workspace_path_hint">Папка должна уже существовать на шлюзе. Clawd не создаёт её.</string>
+    <string name="workspace_delete">Удалить воркспейс</string>
+    <string name="workspace_delete_title">Удалить воркспейс?</string>
+    <string name="workspace_delete_text">Удалить «%1$s» из списка? Папка и чаты на шлюзе останутся.</string>
     <string name="workspace_show_all">Показывать все чаты</string>
     <string name="rename_chat">Переименовать чат</string>
     <string name="seconds">%d с</string>

@@ -73,6 +73,7 @@ import com.nanobot.client.app.AppState
 import com.nanobot.client.app.ConnectionPhase
 import com.nanobot.client.app.filterSessionsByWorkspace
 import com.nanobot.client.core.model.SessionRow
+import com.nanobot.client.settings.WorkspaceEntry
 import com.nanobot.client.resources.Res
 import com.nanobot.client.resources.app_name
 import com.nanobot.client.resources.automations_title
@@ -134,6 +135,7 @@ fun Sidebar(
     var pendingDelete by remember { mutableStateOf<SessionRow?>(null) }
     var pendingRename by remember { mutableStateOf<SessionRow?>(null) }
     var showAddWorkspace by remember { mutableStateOf(false) }
+    var pendingDeleteWorkspace by remember { mutableStateOf<WorkspaceEntry?>(null) }
     val query = state.search.trim()
     val workspaceFiltered = remember(state.sessions, state.showAllChats, state.workspacesInfo, state.settings.activeWorkspacePath) {
         filterSessionsByWorkspace(state)
@@ -338,6 +340,7 @@ fun Sidebar(
             controller = controller,
             state = state,
             onAddWorkspace = { showAddWorkspace = true },
+            onDeleteWorkspace = { pendingDeleteWorkspace = it },
         )
         Spacer(Modifier.height(2.dp))
         ModelSelectorBar(
@@ -376,6 +379,25 @@ fun Sidebar(
         )
     }
 
+    pendingDeleteWorkspace?.let { workspace ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteWorkspace = null },
+            title = { Text(stringResource(Res.string.workspace_delete_title)) },
+            text = { Text(stringResource(Res.string.workspace_delete_text, workspace.name)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    controller.removeWorkspace(workspace.path)
+                    pendingDeleteWorkspace = null
+                }) { Text(stringResource(Res.string.delete)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteWorkspace = null }) {
+                    Text(stringResource(Res.string.cancel))
+                }
+            },
+        )
+    }
+
     if (showAddWorkspace) {
         AddWorkspaceDialog(
             controller = controller,
@@ -390,13 +412,13 @@ private fun WorkspaceSelectorBar(
     controller: AppController,
     state: AppState,
     onAddWorkspace: () -> Unit,
+    onDeleteWorkspace: (WorkspaceEntry) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
     val defaultPath = defaultWorkspacePathOf(state)
     val active = state.settings.activeWorkspacePath
     val currentLabel = when {
-        active.isBlank() -> stringResource(Res.string.workspace_default)
-        active == defaultPath -> active.substringAfterLast('/').ifBlank { active }
+        active.isBlank() || active == defaultPath -> stringResource(Res.string.workspace_default)
         else -> state.settings.workspaces.firstOrNull { it.path == active }?.name ?: active.substringAfterLast('/').ifBlank { active }
     }
     Surface(
@@ -437,8 +459,19 @@ private fun WorkspaceSelectorBar(
     }
     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
         DropdownMenuItem(
-            text = { Text(stringResource(Res.string.workspace_default)) },
-            leadingIcon = if (active.isBlank()) {
+            text = {
+                Column {
+                    Text(stringResource(Res.string.workspace_default))
+                    if (defaultPath.isNotBlank()) {
+                        Text(
+                            defaultPath,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            },
+            leadingIcon = if (active.isBlank() || active == defaultPath) {
                 { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
             } else null,
             onClick = {
@@ -446,39 +479,41 @@ private fun WorkspaceSelectorBar(
                 expanded = false
             },
         )
-        if (defaultPath.isNotBlank()) {
-            DropdownMenuItem(
-                text = { Text("${defaultPath.substringAfterLast('/')} · $defaultPath") },
-                leadingIcon = if (active == defaultPath) {
-                    { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                } else null,
-                onClick = {
-                    controller.setActiveWorkspace(defaultPath)
-                    expanded = false
-                },
-            )
-        }
-        state.settings.workspaces.forEach { entry ->
-            DropdownMenuItem(
-                text = {
-                    Column {
-                        Text(entry.name)
-                        Text(
-                            entry.path,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                },
-                leadingIcon = if (active == entry.path) {
-                    { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                } else null,
-                onClick = {
-                    controller.setActiveWorkspace(entry.path)
-                    expanded = false
-                },
-            )
-        }
+        state.settings.workspaces
+            .filterNot { defaultPath.isNotBlank() && it.path == defaultPath }
+            .forEach { entry ->
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(entry.name)
+                            Text(
+                                entry.path,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    },
+                    leadingIcon = if (active == entry.path) {
+                        { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                    } else null,
+                    trailingIcon = {
+                        IconButton(onClick = {
+                            expanded = false
+                            onDeleteWorkspace(entry)
+                        }) {
+                            Icon(
+                                Icons.Rounded.DeleteOutline,
+                                contentDescription = stringResource(Res.string.workspace_delete),
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    },
+                    onClick = {
+                        controller.setActiveWorkspace(entry.path)
+                        expanded = false
+                    },
+                )
+            }
         HorizontalDivider()
         DropdownMenuItem(
             text = { Text(stringResource(Res.string.workspace_add)) },
@@ -604,6 +639,7 @@ private fun AddWorkspaceDialog(
                     value = path,
                     onValueChange = { path = it },
                     label = { Text(stringResource(Res.string.workspace_path)) },
+                    supportingText = { Text(stringResource(Res.string.workspace_path_hint)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )

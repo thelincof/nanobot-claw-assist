@@ -268,8 +268,15 @@ class JvmAppController(
     }
 
     override fun setActiveWorkspace(path: String) {
-        settings.update { it.copy(activeWorkspacePath = path) }
-        // Apply the scope to the currently open chat right away.
+        val defaultPath = defaultWorkspacePathOf(mutableState.value)
+        val cleanPath = path.trim()
+        // The gateway default workspace is represented by "" everywhere in the
+        // client, so selecting it never creates a duplicate list entry/state.
+        val normalized = if (cleanPath == defaultPath) "" else cleanPath
+        settings.update { it.copy(activeWorkspacePath = normalized) }
+        // Apply the scope to the currently open chat right away. This also sends
+        // an explicit default scope when switching back to Default: null means
+        // "keep the current scope" to Nanobot, not "reset to default".
         val chatId = currentChatId
         if (chatId != null) {
             try {
@@ -283,6 +290,7 @@ class JvmAppController(
     override fun addWorkspace(name: String, path: String) {
         val cleanPath = path.trim().trimEnd('/')
         if (!cleanPath.startsWith("/") || cleanPath.length < 2) return
+        if (cleanPath == defaultWorkspacePathOf(mutableState.value)) return
         val entry = com.nanobot.client.settings.WorkspaceEntry(
             name = name.trim().ifBlank { cleanPath.substringAfterLast('/') },
             path = cleanPath,
@@ -293,11 +301,20 @@ class JvmAppController(
     }
 
     override fun removeWorkspace(path: String) {
+        val wasActive = settings.state.value.activeWorkspacePath == path
         settings.update {
             it.copy(
                 workspaces = it.workspaces.filterNot { w -> w.path == path },
                 activeWorkspacePath = if (it.activeWorkspacePath == path) "" else it.activeWorkspacePath,
             )
+        }
+        if (wasActive) {
+            val chatId = currentChatId ?: return
+            try {
+                gateway.transport().setWorkspaceScope(chatId, workspaceScope())
+            } catch (_: IllegalStateException) {
+                // transport not open — the next message uses the default scope
+            }
         }
     }
 
@@ -414,6 +431,19 @@ class JvmAppController(
         scope.launch {
             val info = runCatching { gateway.api().workspacesRaw() }.getOrNull()
             update { it.copy(workspacesInfo = info) }
+            val defaultPath = defaultWorkspacePathOf(mutableState.value)
+            if (defaultPath.isBlank()) return@launch
+            // The gateway default is rendered as the single "Default" entry.
+            // Drop any manually added copy of the same path from local settings.
+            settings.update { current ->
+                val filtered = current.workspaces.filterNot { it.path == defaultPath }
+                val active = if (current.activeWorkspacePath == defaultPath) "" else current.activeWorkspacePath
+                if (filtered.size == current.workspaces.size && active == current.activeWorkspacePath) {
+                    current
+                } else {
+                    current.copy(workspaces = filtered, activeWorkspacePath = active)
+                }
+            }
         }
     }
 
@@ -1140,13 +1170,14 @@ class JvmAppController(
 
     private suspend fun ensureChat(): String? = currentChatId ?: createChat()
 
-    /** Workspace scope for outgoing frames; null = default gateway workspace. */
+    /** Workspace scope for outgoing frames; null when the gateway default is unknown. */
     private fun workspaceScope(): JsonObject? {
-        val path = settings.state.value.activeWorkspacePath.trim()
+        val active = settings.state.value.activeWorkspacePath.trim()
+        val defaultScope = mutableState.value.workspacesInfo?.get("default_scope") as? JsonObject
+        val defaultPath = (defaultScope?.get("project_path") as? JsonPrimitive)?.contentOrNull.orEmpty()
+        val path = if (active.isEmpty() || active == defaultPath) defaultPath else active
         if (path.isEmpty() || !path.startsWith("/")) return null
-        val defaultPath = defaultWorkspacePathOf(mutableState.value)
-        val defaultMode = ((mutableState.value.workspacesInfo?.get("default_scope") as? JsonObject)
-            ?.get("access_mode") as? JsonPrimitive)?.content
+        val defaultMode = (defaultScope?.get("access_mode") as? JsonPrimitive)?.contentOrNull
         // Choosing another project over a remote connection is only allowed with
         // restricted access (`can_use_full_access=false` on the WebUI surface).
         val mode = if (path == defaultPath) (defaultMode ?: "restricted") else "restricted"

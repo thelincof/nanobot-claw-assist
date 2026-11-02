@@ -129,6 +129,10 @@
     <string name="workspace_name">Name</string>
     <string name="workspace_path">Path on gateway (e.g. /home/user/project)</string>
     <string name="workspace_pick_folder">Pick folder on server…</string>
+    <string name="workspace_path_hint">The folder must already exist on the gateway. Clawd does not create it.</string>
+    <string name="workspace_delete">Remove workspace</string>
+    <string name="workspace_delete_title">Remove workspace?</string>
+    <string name="workspace_delete_text">Remove “%1$s” from the list? The folder and chats on the gateway will stay.</string>
     <string name="workspace_show_all">Show all chats</string>
     <string name="rename_chat">Rename chat</string>
     <string name="seconds">%d s</string>
