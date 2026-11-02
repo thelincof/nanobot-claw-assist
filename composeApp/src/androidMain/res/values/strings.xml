@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Clawd</string>
+    <string name="assistant_shortcut_short">Ассистент</string>
+    <string name="assistant_shortcut_long">Спросить Clawd голосом</string>
+</resources>

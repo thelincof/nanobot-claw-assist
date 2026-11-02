@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="assistant"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/assistant_shortcut_short"
+        android:shortcutLongLabel="@string/assistant_shortcut_long">
+        <intent
+            android:action="com.nanobot.client.action.ASSIST"
+            android:targetPackage="com.nanobot.client"
+            android:targetClass="com.nanobot.client.MainActivity" />
+    </shortcut>
+</shortcuts>
