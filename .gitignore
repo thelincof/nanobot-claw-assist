@@ -9,3 +9,5 @@ composeApp/build/
 keystore/
 *.log
 *.apk
+__pycache__/
+*.pyc
