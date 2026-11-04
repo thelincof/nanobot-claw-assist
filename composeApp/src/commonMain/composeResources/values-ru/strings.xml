@@ -364,6 +364,13 @@
     <string name="assistant_open_settings">Открыть настройки помощника</string>
     <string name="assistant_samsung_hint">Samsung: Настройки → Приложения → Приложения по умолчанию → Цифровой помощник.</string>
     <string name="assistant_auto_listen">Автоматически включать микрофон</string>
+    <string name="hotword_title">Голосовая активация</string>
+    <string name="hotword_toggle">Слушать фразу активации</string>
+    <string name="hotword_phrase">Фраза активации</string>
+    <string name="hotword_hint">Работает, пока приложение открыто. Скажи фразу — Clawd начнёт слушать.</string>
+    <string name="hotword_phrase_hint">Одно слово или короткая фраза. Слово должно быть в офлайн-словаре Vosk.</string>
+    <string name="hotword_mic_needed">Нужен доступ к микрофону.</string>
+    <string name="hotword_grant_mic">Разрешить микрофон</string>
     <string name="assistant_chat_mode">Чат при вызове помощника</string>
     <string name="assistant_mode_new">Новый чат</string>
     <string name="assistant_mode_specific">Определённый чат</string>

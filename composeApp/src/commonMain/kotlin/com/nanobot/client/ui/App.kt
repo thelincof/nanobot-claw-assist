@@ -22,6 +22,8 @@ import com.nanobot.client.app.AppController
 import com.nanobot.client.app.ConnectionPhase
 import com.nanobot.client.app.AssistantLaunch
 import com.nanobot.client.app.createAppController
+import com.nanobot.client.audio.VoicePhase
+import com.nanobot.client.hotword.HotwordEffect
 import com.nanobot.client.platform.rememberMicPermission
 import com.nanobot.client.platform.AppBackgroundEffect
 import com.nanobot.client.platform.NotificationPermissionEffect
@@ -43,7 +45,28 @@ fun App() {
     val snackbar = remember { SnackbarHostState() }
     val micPermission = rememberMicPermission()
     var pendingAssistant by remember { mutableStateOf(false) }
+    var pendingAssistantForceListen by remember { mutableStateOf(false) }
     val assistantRequests by AssistantLaunch.requests.collectAsState()
+
+    HotwordEffect(
+        enabled = state.settings.hotwordEnabled && state.connection.phase == ConnectionPhase.CONNECTED,
+        phrase = state.settings.hotwordPhrase,
+        active = state.voice.phase == VoicePhase.IDLE &&
+            !state.tts.speaking &&
+            !state.tts.loading &&
+            !state.assistantLaunching,
+        onDetected = {
+            screen = Screen.Main
+            pendingAssistantForceListen = true
+            if (micPermission.granted) {
+                pendingAssistantForceListen = false
+                controller.startAssistant(forceListen = true)
+            } else {
+                pendingAssistant = true
+                micPermission.request()
+            }
+        },
+    )
 
     LaunchedEffect(assistantRequests) {
         if (!AssistantLaunch.consumePending()) return@LaunchedEffect
@@ -62,7 +85,9 @@ fun App() {
     LaunchedEffect(micPermission.granted) {
         if (pendingAssistant && micPermission.granted) {
             pendingAssistant = false
-            controller.startAssistant()
+            val forceListen = pendingAssistantForceListen
+            pendingAssistantForceListen = false
+            controller.startAssistant(forceListen = forceListen)
         }
     }
 

@@ -8,10 +8,14 @@ import com.nanobot.client.core.gateway.normalizeBaseUrl
 import com.nanobot.client.core.model.BootstrapResponse
 import com.nanobot.client.core.model.InboundEvent
 import com.nanobot.client.core.model.parseInboundEvent
+import com.nanobot.client.hotword.buildVoskGrammar
+import com.nanobot.client.hotword.normalizeHotwordPhrase
+import com.nanobot.client.hotword.transcriptMatchesPhrase
 import com.nanobot.client.tts.chunkForSpeech
 import com.nanobot.client.tts.parseWav
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -94,6 +98,27 @@ class CoreTest {
         assertTrue(chunks.size > 1)
         assertTrue(chunks.all { it.length <= 120 })
         assertNotNull(chunks.firstOrNull())
+    }
+
+    @Test
+    fun normalizesHotwordPhrase() {
+        assertEquals("клод", normalizeHotwordPhrase("  Клод!  "))
+        assertEquals("эй клод", normalizeHotwordPhrase("Эй, Клод..."))
+        assertEquals("", normalizeHotwordPhrase("!!!"))
+    }
+
+    @Test
+    fun buildsVoskHotwordGrammar() {
+        assertEquals("[\"клод\", \"[unk]\"]", buildVoskGrammar("Клод!"))
+        assertEquals("[\"[unk]\"]", buildVoskGrammar("  "))
+    }
+
+    @Test
+    fun matchesHotwordAsWholeWords() {
+        assertTrue(transcriptMatchesPhrase("привет, клод", "клод"))
+        assertTrue(transcriptMatchesPhrase("эй клод как дела", "эй клод"))
+        assertFalse(transcriptMatchesPhrase("клад", "клод"))
+        assertFalse(transcriptMatchesPhrase("клодовый", "клод"))
     }
 
     @Test

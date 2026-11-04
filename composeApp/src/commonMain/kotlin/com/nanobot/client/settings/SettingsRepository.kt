@@ -31,6 +31,8 @@ data class AppSettings(
     val assistantChatMode: String = "new", // "new" | "specific"
     val assistantSessionKey: String? = null,
     val assistantAutoListen: Boolean = true,
+    val hotwordEnabled: Boolean = false,
+    val hotwordPhrase: String = "клод",
 )
 
 @Serializable
@@ -69,6 +71,8 @@ class SettingsRepository(private val settings: Settings) {
         },
         assistantSessionKey = settings.getStringOrNull(KEY_ASSISTANT_SESSION),
         assistantAutoListen = settings.getBoolean(KEY_ASSISTANT_AUTO_LISTEN, true),
+        hotwordEnabled = settings.getBoolean(KEY_HOTWORD_ENABLED, false),
+        hotwordPhrase = settings.getString(KEY_HOTWORD_PHRASE, "клод"),
     )
 
     fun update(transform: (AppSettings) -> AppSettings) {
@@ -96,6 +100,8 @@ class SettingsRepository(private val settings: Settings) {
         if (next.assistantSessionKey == null) settings.remove(KEY_ASSISTANT_SESSION)
         else settings.putString(KEY_ASSISTANT_SESSION, next.assistantSessionKey)
         settings.putBoolean(KEY_ASSISTANT_AUTO_LISTEN, next.assistantAutoListen)
+        settings.putBoolean(KEY_HOTWORD_ENABLED, next.hotwordEnabled)
+        settings.putString(KEY_HOTWORD_PHRASE, next.hotwordPhrase)
         mutableState.value = next
     }
 
@@ -124,6 +130,8 @@ class SettingsRepository(private val settings: Settings) {
         const val KEY_ASSISTANT_CHAT_MODE = "assistant.chatMode"
         const val KEY_ASSISTANT_SESSION = "assistant.sessionKey"
         const val KEY_ASSISTANT_AUTO_LISTEN = "assistant.autoListen"
+        const val KEY_HOTWORD_ENABLED = "assistant.hotwordEnabled"
+        const val KEY_HOTWORD_PHRASE = "assistant.hotwordPhrase"
     }
 }
 

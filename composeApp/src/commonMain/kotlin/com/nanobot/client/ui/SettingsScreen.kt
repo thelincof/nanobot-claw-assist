@@ -61,7 +61,9 @@ import androidx.compose.ui.unit.dp
 import com.nanobot.client.app.AppController
 import com.nanobot.client.app.AppState
 import com.nanobot.client.app.ConnectionPhase
+import com.nanobot.client.hotword.hotwordSupported
 import com.nanobot.client.platform.AssistantPlatformSection
+import com.nanobot.client.platform.rememberMicPermission
 import com.nanobot.client.settings.AppSettings
 import com.nanobot.client.tts.availableTtsEngines
 import com.nanobot.client.tts.systemDefaultTtsEngine
@@ -239,6 +241,7 @@ private fun AppSettingsTab(controller: AppController, state: AppState) {
     var secretVisible by remember { mutableStateOf(false) }
     var apiKeyVisible by remember { mutableStateOf(false) }
     var showSaved by remember { mutableStateOf(false) }
+    val micPermission = rememberMicPermission()
     val connected = state.connection.phase == ConnectionPhase.CONNECTED
     val testText = stringResource(Res.string.tts_test_text)
 
@@ -336,6 +339,49 @@ private fun AppSettingsTab(controller: AppController, state: AppState) {
                     checked = draft.assistantAutoListen,
                     onCheckedChange = { draft = draft.copy(assistantAutoListen = it) },
                 )
+            }
+            if (hotwordSupported()) {
+                Spacer(Modifier.height(12.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(Res.string.hotword_title), style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            stringResource(Res.string.hotword_hint),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = draft.hotwordEnabled,
+                        onCheckedChange = { enabled ->
+                            draft = draft.copy(hotwordEnabled = enabled)
+                            if (enabled && !micPermission.granted) micPermission.request()
+                        },
+                    )
+                }
+                if (draft.hotwordEnabled) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = draft.hotwordPhrase,
+                        onValueChange = { draft = draft.copy(hotwordPhrase = it) },
+                        label = { Text(stringResource(Res.string.hotword_phrase)) },
+                        supportingText = { Text(stringResource(Res.string.hotword_phrase_hint)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (!micPermission.granted) {
+                        Text(
+                            stringResource(Res.string.hotword_mic_needed),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        TextButton(onClick = micPermission.request) {
+                            Text(stringResource(Res.string.hotword_grant_mic))
+                        }
+                    }
+                }
             }
             Spacer(Modifier.height(12.dp))
             Text(stringResource(Res.string.assistant_chat_mode), style = MaterialTheme.typography.bodyMedium)

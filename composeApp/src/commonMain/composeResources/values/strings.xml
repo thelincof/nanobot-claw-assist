@@ -364,6 +364,13 @@
     <string name="assistant_open_settings">Open assistant settings</string>
     <string name="assistant_samsung_hint">Samsung: Settings → Apps → Default apps → Digital assistant app.</string>
     <string name="assistant_auto_listen">Start listening automatically</string>
+    <string name="hotword_title">Wake word</string>
+    <string name="hotword_toggle">Listen for wake word</string>
+    <string name="hotword_phrase">Wake phrase</string>
+    <string name="hotword_hint">Works while the app is open. Say the phrase and Clawd starts listening.</string>
+    <string name="hotword_phrase_hint">One word or a short phrase. The word must be in the offline Vosk dictionary.</string>
+    <string name="hotword_mic_needed">Microphone permission is required.</string>
+    <string name="hotword_grant_mic">Allow microphone</string>
     <string name="assistant_chat_mode">Chat on assistant launch</string>
     <string name="assistant_mode_new">New chat</string>
     <string name="assistant_mode_specific">Chosen chat</string>

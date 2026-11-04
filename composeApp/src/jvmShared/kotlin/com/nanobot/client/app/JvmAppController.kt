@@ -87,6 +87,7 @@ class JvmAppController(
     private var lastTurnEventAt: Long = 0
     private var staleStrikes = 0
     private var assistantPending = false
+    private var assistantForceListen = false
 
     init {
         scope.launch {
@@ -113,7 +114,10 @@ class JvmAppController(
                         assistantLaunching = if (mapped.phase == ConnectionPhase.FAILED) false else current.assistantLaunching,
                     )
                 }
-                if (mapped.phase == ConnectionPhase.FAILED) assistantPending = false
+                if (mapped.phase == ConnectionPhase.FAILED) {
+                    assistantPending = false
+                    assistantForceListen = false
+                }
                 if (mapped.phase == ConnectionPhase.CONNECTED && !wasConnected) {
                     refreshSessions()
                     loadWorkspacesInfo()
@@ -123,7 +127,9 @@ class JvmAppController(
                     loadSidebarState()
                     if (assistantPending) {
                         assistantPending = false
-                        scope.launch { performAssistantLaunch() }
+                        val forceListen = assistantForceListen
+                        assistantForceListen = false
+                        scope.launch { performAssistantLaunch(forceListen) }
                     }
                 }
             }
@@ -216,6 +222,7 @@ class JvmAppController(
         gateway.disconnect()
         clearChatState()
         assistantPending = false
+        assistantForceListen = false
         update {
             it.copy(
                 connection = ConnectionUi(ConnectionPhase.IDLE),
@@ -1103,15 +1110,17 @@ class JvmAppController(
         scope.launch { loadThread(chatId, session.key) }
     }
 
-    override fun startAssistant() {
+    override fun startAssistant(forceListen: Boolean) {
         logD("assistant: invoked, phase=${mutableState.value.connection.phase}, ws=${mutableState.value.wsConnected}")
         update { it.copy(assistantLaunching = true) }
         if (mutableState.value.connection.phase != ConnectionPhase.CONNECTED) {
             assistantPending = true
+            assistantForceListen = forceListen
             scope.launch {
                 delay(20_000)
                 if (assistantPending) {
                     assistantPending = false
+                    assistantForceListen = false
                     update {
                         it.copy(
                             assistantLaunching = false,
@@ -1122,11 +1131,12 @@ class JvmAppController(
             }
             return
         }
-        scope.launch { performAssistantLaunch() }
+        scope.launch { performAssistantLaunch(forceListen) }
     }
 
-    private suspend fun performAssistantLaunch() {
+    private suspend fun performAssistantLaunch(forceListen: Boolean) {
         assistantPending = false
+        assistantForceListen = false
         val saved = settings.state.value
         // Cancel any stale recorder state first: a previous PROCESSING/LISTENING
         // session must never swallow a fresh assistant invocation.
@@ -1151,7 +1161,7 @@ class JvmAppController(
             clearChatState()
         }
 
-        if (!saved.assistantAutoListen) {
+        if (!saved.assistantAutoListen && !forceListen) {
             if (currentChatId == null && createChat() == null) {
                 update { it.copy(assistantLaunching = false) }
                 return

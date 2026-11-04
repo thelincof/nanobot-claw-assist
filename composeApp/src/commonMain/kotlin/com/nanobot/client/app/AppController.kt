@@ -136,7 +136,7 @@ interface AppController {
     fun dismissError()
     fun onBackground()
     fun onForeground()
-    fun startAssistant()
+    fun startAssistant(forceListen: Boolean = false)
 }
 
 expect fun createAppController(): AppController
