@@ -173,7 +173,7 @@ private class AndroidHotwordDetector(
             withContext(Dispatchers.Main) {
                 playChime()
                 delay(220)
-                onDetected()
+                runCatching { onDetected() }
                 detection.complete(Unit)
             }
         }
