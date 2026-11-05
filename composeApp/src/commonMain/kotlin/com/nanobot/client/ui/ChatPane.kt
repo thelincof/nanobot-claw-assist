@@ -297,6 +297,14 @@ private fun MessageList(controller: AppController, state: AppState) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val messages = state.messages
+    val currentTurnVisible = state.activeTurnId?.let { turnId ->
+        messages.any { message ->
+            message.turnId == turnId &&
+                (message.role == "activity" || message.content.isNotBlank() || !message.reasoning.isNullOrBlank())
+        }
+    } ?: false
+    val showPending = state.sending || state.awaitingFirstToken ||
+        (state.activeTurnId != null && !currentTurnVisible)
     val atBottom by remember(messages.size) {
         derivedStateOf {
             val info = listState.layoutInfo
@@ -319,6 +327,7 @@ private fun MessageList(controller: AppController, state: AppState) {
         last?.fileEdits?.size,
         state.sending,
         state.awaitingFirstToken,
+        showPending,
     ) {
         if (last != null && atBottom && messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.lastIndex)
@@ -345,7 +354,7 @@ private fun MessageList(controller: AppController, state: AppState) {
                             onSpeak = { text -> controller.speakText(text) },
                         )
                     }
-                    if (state.sending || state.awaitingFirstToken) {
+                    if (showPending) {
                         item(key = "pending-placeholder") { PendingBubble() }
                     }
                 }

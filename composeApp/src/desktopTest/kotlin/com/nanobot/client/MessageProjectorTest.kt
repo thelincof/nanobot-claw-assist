@@ -63,6 +63,62 @@ class MessageProjectorTest {
     }
 
     @Test
+    fun foldsOneActivityAndMergesToolPhases() {
+        val start = ToolProgressEvent(
+            phase = "start",
+            callId = "call-1",
+            name = "exec",
+            arguments = buildJsonObject { put("command", "sleep 1") },
+        )
+        val end = start.copy(phase = "end", result = kotlinx.serialization.json.JsonPrimitive("ok"))
+        val canonical = listOf(
+            UiMessage(id = "u1", role = "user", content = "hi", turnId = "t1", createdAt = 1),
+            UiMessage(
+                id = "r1",
+                role = "assistant",
+                content = "",
+                reasoning = "step 1",
+                turnId = "t1",
+                createdAt = 2,
+            ),
+            UiMessage(
+                id = "t-start",
+                role = "tool",
+                kind = "trace",
+                toolEvents = listOf(start),
+                turnId = "t1",
+                createdAt = 3,
+            ),
+            UiMessage(
+                id = "r2",
+                role = "assistant",
+                content = "",
+                reasoning = "step 2",
+                turnId = "t1",
+                createdAt = 4,
+            ),
+            UiMessage(
+                id = "t-end",
+                role = "tool",
+                kind = "trace",
+                toolEvents = listOf(end),
+                turnId = "t1",
+                createdAt = 5,
+            ),
+            UiMessage(id = "a1", role = "assistant", content = "done", turnId = "t1", createdAt = 6),
+        )
+
+        val projected = MessageProjector.project(canonical, emptyMap(), emptyMap())
+
+        assertEquals(listOf("user", "activity", "assistant"), projected.map { it.role })
+        val activity = projected[1]
+        assertEquals(1, activity.toolEvents?.size)
+        assertEquals("end", activity.toolEvents?.single()?.phase)
+        assertEquals("step 1\n\nstep 2", activity.reasoning)
+        assertEquals("done", projected.last().content)
+    }
+
+    @Test
     fun skipsEmptyAssistantMarkers() {
         val canonical = listOf(
             UiMessage(id = "u1", role = "user", content = "hi", createdAt = 1),
@@ -73,7 +129,8 @@ class MessageProjectorTest {
 
         val projected = MessageProjector.project(canonical, emptyMap(), emptyMap())
 
-        assertEquals(listOf("user", "assistant", "assistant"), projected.map { it.role })
+        // Reasoning is part of the turn activity now, not a separate assistant bubble.
+        assertEquals(listOf("user", "activity", "assistant"), projected.map { it.role })
         assertEquals("thinking", projected[1].reasoning)
         assertEquals("answer", projected[2].content)
     }

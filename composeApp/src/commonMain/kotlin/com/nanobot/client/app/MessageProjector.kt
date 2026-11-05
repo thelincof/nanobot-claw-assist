@@ -6,48 +6,29 @@ import com.nanobot.client.core.model.UiMessage
 
 /**
  * Projects the canonical Nanobot thread + live transient/optimistic messages into
- * the flat list the chat renders.
+ * the list the chat renders.
  *
- * Nanobot stores tool calls as separate `role="tool"` / `kind="trace"` rows, and
- * keeps an empty assistant marker before each row. Rendering those rows as chat
- * bubbles leaks raw `exec({...})` text into the conversation, so they are merged
- * into one `role="activity"` message per [UiMessage.activitySegmentId].
+ * Nanobot stores reasoning/tool calls as separate rows. They are all folded into
+ * exactly one activity card per turn, so a live stream, a thread refresh and a
+ * replay never produce duplicate or reordered cards.
  */
 object MessageProjector {
     private fun isToolRow(message: UiMessage): Boolean =
         message.role == "tool" || message.kind == "trace"
 
-    /** Empty assistant rows are stream/activity markers, not visible messages. */
-    private fun hasVisibleContent(message: UiMessage): Boolean =
-        message.content.isNotBlank() ||
-            !message.reasoning.isNullOrBlank() ||
+    private fun hasActivityContent(message: UiMessage): Boolean =
+        !message.reasoning.isNullOrBlank() ||
             !message.toolEvents.isNullOrEmpty() ||
             !message.fileEdits.isNullOrEmpty() ||
             !message.traces.isNullOrEmpty()
 
-    private fun segmentKey(message: UiMessage): String =
-        message.activitySegmentId?.takeIf { it.isNotBlank() }
-            ?: message.turnId?.takeIf { it.isNotBlank() }
-            ?: message.id.ifBlank { "anonymous" }
+    private fun hasVisibleContent(message: UiMessage): Boolean =
+        message.content.isNotBlank() || hasActivityContent(message)
 
-    private fun mergeTools(
-        existing: List<ToolProgressEvent>?,
-        incoming: List<ToolProgressEvent>?,
-    ): List<ToolProgressEvent>? {
-        if (incoming.isNullOrEmpty()) return existing
-        val merged = linkedMapOf<String, ToolProgressEvent>()
-        existing?.forEachIndexed { index, item -> merged[item.callId ?: "e$index"] = item }
-        incoming.forEachIndexed { index, item -> merged[item.callId ?: "i$index"] = item }
-        return merged.values.toList()
-    }
-
-    private fun mergeEdits(existing: List<UiFileEdit>?, incoming: List<UiFileEdit>?): List<UiFileEdit>? {
-        if (incoming.isNullOrEmpty()) return existing
-        val merged = linkedMapOf<String, UiFileEdit>()
-        existing?.forEachIndexed { index, item -> merged[item.callId.ifBlank { "e$index" }] = item }
-        incoming.forEachIndexed { index, item -> merged[item.callId.ifBlank { "i$index" }] = item }
-        return merged.values.toList()
-    }
+    private fun keyOf(message: UiMessage, fallback: String = message.id): String =
+        message.turnId?.takeIf { it.isNotBlank() }
+            ?: message.activitySegmentId?.takeIf { it.isNotBlank() }?.let { "segment:$it" }
+            ?: fallback.ifBlank { "anonymous" }
 
     private fun tracesOf(message: UiMessage): List<String> {
         val raw = message.traces?.takeIf { it.isNotEmpty() }
@@ -55,112 +36,215 @@ object MessageProjector {
         return raw.map { it.trim() }.filter { it.isNotEmpty() }
     }
 
+    private fun mergeReasoning(existing: String?, incoming: String?): String? {
+        val next = incoming?.trim().orEmpty()
+        if (next.isEmpty()) return existing
+        val current = existing?.trim().orEmpty()
+        return when {
+            current.isEmpty() -> next
+            current == next -> current
+            current.contains(next) -> current
+            next.contains(current) -> next
+            else -> "$current\n\n$next"
+        }
+    }
+
+    private fun toolKey(tool: ToolProgressEvent, index: Int): String =
+        tool.callId?.takeIf { it.isNotBlank() }
+            ?: buildString {
+                append(tool.name.orEmpty())
+                append('|')
+                append(tool.arguments?.toString().orEmpty())
+                if (isEmpty()) append("tool-$index")
+            }
+
+    private fun mergeTool(
+        existing: ToolProgressEvent,
+        incoming: ToolProgressEvent,
+    ): ToolProgressEvent = existing.copy(
+        version = incoming.version ?: existing.version,
+        // The latest event wins for the phase; start/end/error usually arrive in order.
+        phase = incoming.phase ?: existing.phase,
+        callId = incoming.callId ?: existing.callId,
+        name = incoming.name ?: existing.name,
+        arguments = incoming.arguments ?: existing.arguments,
+        result = incoming.result ?: existing.result,
+        error = incoming.error ?: existing.error,
+        files = incoming.files ?: existing.files,
+        embeds = incoming.embeds ?: existing.embeds,
+        function = incoming.function ?: existing.function,
+    )
+
+    private fun editKey(edit: UiFileEdit, index: Int): String =
+        edit.callId.ifBlank { "${edit.tool}|${edit.path}|$index" }
+
+    private class TurnBucket(val key: String) {
+        var turnId: String? = null
+        var turnPhase: String? = null
+        var turnSeq: Int? = null
+        var activityCreatedAt: Long = Long.MAX_VALUE
+        var activitySegmentId: String? = null
+        var reasoning: String? = null
+        var reasoningStreaming: Boolean = false
+        var activityStreaming: Boolean = false
+        val users = mutableListOf<UiMessage>()
+        val finals = mutableListOf<UiMessage>()
+        val tools = linkedMapOf<String, ToolProgressEvent>()
+        val edits = linkedMapOf<String, UiFileEdit>()
+        val traces = linkedSetOf<String>()
+
+        fun mergeActivity(message: UiMessage) {
+            if (!hasActivityContent(message)) return
+            turnId = turnId ?: message.turnId
+            turnPhase = turnPhase ?: message.turnPhase
+            turnSeq = turnSeq ?: message.turnSeq
+            if (message.createdAt > 0 && message.createdAt < activityCreatedAt) {
+                activityCreatedAt = message.createdAt
+            }
+            activitySegmentId = activitySegmentId ?: message.activitySegmentId
+            reasoning = mergeReasoning(reasoning, message.reasoning)
+            reasoningStreaming = reasoningStreaming || message.reasoningStreaming
+            activityStreaming = activityStreaming || message.isStreaming || message.reasoningStreaming
+            message.toolEvents.orEmpty().forEachIndexed { index, tool ->
+                val key = toolKey(tool, index)
+                tools[key] = tools[key]?.let { mergeTool(it, tool) } ?: tool
+            }
+            message.fileEdits.orEmpty().forEachIndexed { index, edit ->
+                edits[editKey(edit, index)] = edit
+            }
+            traces += tracesOf(message)
+        }
+
+        fun hasActivity(): Boolean =
+            !reasoning.isNullOrBlank() ||
+                tools.isNotEmpty() ||
+                edits.isNotEmpty() ||
+                traces.isNotEmpty()
+    }
+
+    private fun activityMessage(bucket: TurnBucket): UiMessage? {
+        if (!bucket.hasActivity()) return null
+        return UiMessage(
+            id = "activity-${bucket.key}",
+            role = "activity",
+            content = "",
+            kind = "trace",
+            createdAt = bucket.activityCreatedAt.takeIf { it != Long.MAX_VALUE } ?: 0L,
+            reasoning = bucket.reasoning,
+            reasoningStreaming = bucket.reasoningStreaming,
+            isStreaming = bucket.activityStreaming,
+            turnId = bucket.turnId,
+            turnPhase = bucket.turnPhase,
+            turnSeq = bucket.turnSeq,
+            toolEvents = bucket.tools.values.toList().takeIf { it.isNotEmpty() },
+            fileEdits = bucket.edits.values.toList().takeIf { it.isNotEmpty() },
+            traces = bucket.traces.toList().takeIf { it.isNotEmpty() },
+            activitySegmentId = bucket.activitySegmentId,
+        )
+    }
+
+    private fun finalMessage(message: UiMessage, id: String): UiMessage? {
+        if (message.content.isBlank()) return null
+        return message.copy(
+            id = id,
+            role = "assistant",
+            reasoning = null,
+            reasoningStreaming = false,
+            toolEvents = null,
+            fileEdits = null,
+            traces = null,
+        )
+    }
+
     fun project(
         canonical: List<UiMessage>,
         transient: Map<String, UiMessage>,
         optimistic: Map<String, UiMessage>,
     ): List<UiMessage> {
-        val result = mutableListOf<UiMessage>()
-        val canonicalById = canonical.filter { it.id.isNotBlank() }.associateBy { it.id }
-        val canonicalTurnIds = canonical.mapNotNull { it.turnId }.toSet()
-        val emittedSegments = mutableSetOf<String>()
-        val toolRowsBySegment = canonical.filter { isToolRow(it) }.groupBy { segmentKey(it) }
+        val buckets = linkedMapOf<String, TurnBucket>()
+        val systemMessages = mutableListOf<UiMessage>()
+
+        fun bucketFor(key: String): TurnBucket = buckets.getOrPut(key) { TurnBucket(key) }
 
         canonical.forEach { message ->
-            if (isToolRow(message)) {
-                val key = segmentKey(message)
-                if (emittedSegments.add(key)) {
-                    val group = toolRowsBySegment[key].orEmpty()
-                    var tools: List<ToolProgressEvent>? = null
-                    var edits: List<UiFileEdit>? = null
-                    val traces = mutableListOf<String>()
-                    group.forEach { row ->
-                        tools = mergeTools(tools, row.toolEvents)
-                        edits = mergeEdits(edits, row.fileEdits)
-                        tracesOf(row).forEach { trace -> if (trace !in traces) traces += trace }
-                    }
-                    if (!tools.isNullOrEmpty() || !edits.isNullOrEmpty() || traces.isNotEmpty()) {
-                        result += UiMessage(
-                            id = "activity-$key",
-                            role = "activity",
-                            content = "",
-                            kind = "trace",
-                            createdAt = message.createdAt,
-                            turnId = message.turnId,
-                            turnPhase = message.turnPhase,
-                            turnSeq = message.turnSeq,
-                            toolEvents = tools,
-                            fileEdits = edits,
-                            traces = traces.takeIf { it.isNotEmpty() },
-                            activitySegmentId = message.activitySegmentId,
-                        )
-                    }
-                }
+            if (message.role == "system") {
+                systemMessages += message
                 return@forEach
             }
+            val key = keyOf(message)
+            val bucket = bucketFor(key)
+            bucket.turnId = bucket.turnId ?: message.turnId
+            bucket.turnPhase = bucket.turnPhase ?: message.turnPhase
+            bucket.turnSeq = bucket.turnSeq ?: message.turnSeq
 
-            // Empty assistant rows are stream/activity segment markers, not messages.
-            if (
-                message.role == "assistant" &&
-                message.content.isBlank() &&
-                message.toolEvents.isNullOrEmpty() &&
-                message.fileEdits.isNullOrEmpty() &&
-                message.reasoning.isNullOrBlank() &&
-                message.traces.isNullOrEmpty()
-            ) {
-                return@forEach
-            }
-
-            // Prefer transient by turnId (webui protocol) or by server message id.
-            val transientByTurnId = message.turnId?.let { transient[it] }
-            val transientById = if (message.id.isNotBlank()) transient[message.id] else null
-            val transientMessage = transientByTurnId ?: transientById
-            val useTransient = transientMessage != null &&
-                message.role == "assistant" &&
-                (transientMessage.isStreaming || !hasVisibleContent(message)) &&
-                (
-                    transientMessage.content.isNotBlank() ||
-                        transientMessage.toolEvents != null ||
-                        transientMessage.reasoning != null ||
-                        transientMessage.traces != null
-                    )
-            result += if (useTransient && transientMessage != null) transientMessage else message
-        }
-
-        transient.forEach { (turnId, message) ->
-            // Do not suppress a live streaming message just because the
-            // canonical snapshot currently has an empty assistant marker.
-            val inCanonicalByTurnId = canonical.any {
-                it.turnId == turnId && it.role == "assistant" && hasVisibleContent(it)
-            }
-            val inCanonicalById = message.id.isNotBlank() && canonicalById.containsKey(message.id)
-            if (!inCanonicalByTurnId && !inCanonicalById) {
-                val hasCanonicalTools = canonical.any { isToolRow(it) && it.turnId == turnId }
-                val candidate = if (hasCanonicalTools) {
-                    // Canonical activity rows already render these tools; keeping
-                    // the transient copy would show the same tool twice.
-                    message.copy(toolEvents = null, fileEdits = null, traces = null)
-                } else {
-                    message
+            when {
+                isToolRow(message) -> bucket.mergeActivity(message)
+                message.role == "assistant" -> {
+                    bucket.mergeActivity(message)
+                    if (message.content.isNotBlank()) {
+                        val id = if (bucket.finals.isEmpty()) {
+                            "assistant-${bucket.key}"
+                        } else {
+                            "assistant-${bucket.key}-${bucket.finals.size + 1}"
+                        }
+                        finalMessage(message, id)?.let { bucket.finals += it }
+                    }
                 }
-                if (hasVisibleContent(candidate)) result += candidate
+                message.role == "user" -> {
+                    if (bucket.users.none { it.id == message.id || it.turnId == message.turnId }) {
+                        bucket.users += message
+                    }
+                }
+                hasVisibleContent(message) -> bucket.users += message
             }
         }
 
         optimistic.forEach { (turnId, message) ->
-            if (turnId !in canonicalTurnIds) result += message
+            val key = message.turnId?.takeIf { it.isNotBlank() } ?: turnId
+            val bucket = bucketFor(key)
+            bucket.turnId = bucket.turnId ?: message.turnId
+                ?: turnId.takeIf { it.isNotBlank() && it != "current" }
+            bucket.turnPhase = bucket.turnPhase ?: message.turnPhase
+            bucket.turnSeq = bucket.turnSeq ?: message.turnSeq
+            if (bucket.users.none { it.turnId == message.turnId && it.role == "user" }) {
+                bucket.users += message
+            }
         }
 
-        val seen = mutableSetOf<String>()
-        return result
-            .filter { message ->
-                val key = if (message.id.isNotBlank()) {
-                    "id:${message.id}"
-                } else {
-                    "t:${message.turnId}:${message.role}:${message.createdAt}"
+        transient.forEach { (turnId, message) ->
+            val key = message.turnId?.takeIf { it.isNotBlank() } ?: turnId
+            val bucket = bucketFor(key)
+            bucket.turnId = bucket.turnId ?: message.turnId
+                ?: turnId.takeIf { it.isNotBlank() && it != "current" }
+            bucket.turnPhase = bucket.turnPhase ?: message.turnPhase
+            bucket.turnSeq = bucket.turnSeq ?: message.turnSeq
+
+            if (message.role == "assistant") {
+                bucket.mergeActivity(message)
+                if (message.content.isNotBlank()) {
+                    val index = bucket.finals.indexOfFirst { it.content.isNotBlank() }
+                    val current = bucket.finals.getOrNull(index)
+                    val shouldPreferTransient = current == null ||
+                        (message.isStreaming && message.content.length >= current.content.length)
+                    if (shouldPreferTransient) {
+                        val id = current?.id ?: "assistant-${bucket.key}"
+                        finalMessage(message, id)?.let { replacement ->
+                            if (index >= 0) bucket.finals[index] = replacement else bucket.finals += replacement
+                        }
+                    }
                 }
-                seen.add(key)
+            } else if (message.role == "user" && bucket.users.none { it.turnId == message.turnId }) {
+                bucket.users += message
             }
-            .sortedWith(compareBy({ it.createdAt }, { it.id }))
+        }
+
+        val result = mutableListOf<UiMessage>()
+        systemMessages.forEach { result += it }
+        buckets.values.forEach { bucket ->
+            result += bucket.users
+            activityMessage(bucket)?.let { result += it }
+            result += bucket.finals
+        }
+        return result
     }
 }

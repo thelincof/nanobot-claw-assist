@@ -88,6 +88,7 @@ class JvmAppController(
     private var staleStrikes = 0
     private var assistantPending = false
     private var assistantForceListen = false
+    private var pendingTurnId: String? = null
 
     init {
         scope.launch {
@@ -562,6 +563,7 @@ class JvmAppController(
             delay(3_000)
             if (mutableState.value.stopping) {
                 clearStreamingFlags()
+                pendingTurnId = null
                 update {
                     it.copy(
                         stopping = false,
@@ -1219,6 +1221,7 @@ class JvmAppController(
             val chatId = gateway.transport().newChat(workspaceScope = workspaceScope())
             val key = "websocket:$chatId"
             currentChatId = chatId
+            pendingTurnId = null
             canonical = emptyList()
             transient.clear()
             optimistic.clear()
@@ -1285,6 +1288,7 @@ class JvmAppController(
             localMedia = attachments.takeIf { it.isNotEmpty() },
         )
         optimistic[turnId] = userMessage
+        pendingTurnId = turnId
         noteTurnActivity()
         update {
             it.copy(
@@ -1312,6 +1316,7 @@ class JvmAppController(
             )
             update { it.copy(sending = false, activeTurnId = turnId) }
         } catch (error: Exception) {
+            if (pendingTurnId == turnId) pendingTurnId = null
             optimistic[turnId] = userMessage.copy(failed = true)
             update {
                 it.copy(
@@ -1334,6 +1339,7 @@ class JvmAppController(
 
     private fun clearChatState() {
         currentChatId = null
+        pendingTurnId = null
         canonical = emptyList()
         transient.clear()
         optimistic.clear()
@@ -1383,12 +1389,22 @@ class JvmAppController(
                     transient.clear()
                 }
             }
+            val localTurnInFlight = pendingTurnId != null ||
+                mutableState.value.sending ||
+                mutableState.value.awaitingFirstToken ||
+                transient.values.any { it.isStreaming || it.reasoningStreaming }
+            val activeTurn = payload.activeTurnId
+                ?: mutableState.value.activeTurnId.takeIf { localTurnInFlight }
+                ?: pendingTurnId
             update {
                 it.copy(
                     messages = project(),
                     messagesLoading = false,
-                    activeTurnId = payload.activeTurnId,
-                    awaitingFirstToken = payload.activeTurnId != null && it.awaitingFirstToken,
+                    activeTurnId = activeTurn,
+                    // A server snapshot may briefly report active_turn_id=null
+                    // while a locally started turn is still being accepted.
+                    awaitingFirstToken = activeTurn != null &&
+                        (it.awaitingFirstToken || pendingTurnId != null),
                 )
             }
         } catch (error: CancellationException) {
@@ -1415,12 +1431,12 @@ class JvmAppController(
             -> Unit
             is InboundEvent.Delta -> if (matches(event.value.chatId)) {
                 noteTurnActivity()
-                markStreamStarted()
+                markStreamStarted(event.value.turnId)
                 foldDelta(event.value)
             }
             is InboundEvent.ReasoningDelta -> if (matches(event.value.chatId)) {
                 noteTurnActivity()
-                markStreamStarted()
+                markStreamStarted(event.value.turnId)
                 foldReasoning(event.value)
             }
             is InboundEvent.ReasoningEnd -> if (matches(event.value.chatId)) {
@@ -1433,12 +1449,12 @@ class JvmAppController(
             }
             is InboundEvent.Message -> if (matches(event.value.chatId)) {
                 noteTurnActivity()
-                markStreamStarted()
+                markStreamStarted(event.value.turnId)
                 foldMessage(event.value)
             }
             is InboundEvent.FileEdit -> if (matches(event.value.chatId)) {
                 noteTurnActivity()
-                markStreamStarted()
+                markStreamStarted(event.value.turnId)
                 foldFileEdit(event.value)
             }
             is InboundEvent.TurnEnd -> if (matches(event.value.chatId)) {
@@ -1453,6 +1469,7 @@ class JvmAppController(
                 val chatId = event.value.chatId
                 if (chatId == null || matches(chatId)) {
                     clearStreamingFlags()
+                    pendingTurnId = null
                     update {
                         it.copy(
                             error = event.value.detail ?: event.value.reason ?: "Ошибка gateway",
@@ -1469,9 +1486,16 @@ class JvmAppController(
         }
     }
 
-    private fun markStreamStarted() {
-        if (mutableState.value.awaitingFirstToken || mutableState.value.sending) {
-            update { it.copy(awaitingFirstToken = false, sending = false) }
+    private fun markStreamStarted(turnId: String? = null) {
+        val active = mutableState.value.activeTurnId ?: turnId ?: pendingTurnId
+        if (mutableState.value.awaitingFirstToken || mutableState.value.sending || active != null) {
+            update {
+                it.copy(
+                    awaitingFirstToken = false,
+                    sending = false,
+                    activeTurnId = it.activeTurnId ?: active,
+                )
+            }
         }
     }
 
@@ -1604,6 +1628,7 @@ class JvmAppController(
         }
         // A turn finished: nothing may remain in a "streaming" visual state.
         clearStreamingFlags()
+        pendingTurnId = null
         val turnId = event.turnId
         if (turnId != null) completedTurns.add(turnId)
         val finalText = message?.content?.takeIf { it.isNotBlank() }
