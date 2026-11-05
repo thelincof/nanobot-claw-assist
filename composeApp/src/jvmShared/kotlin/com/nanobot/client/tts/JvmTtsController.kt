@@ -1,5 +1,6 @@
 package com.nanobot.client.tts
 
+import com.nanobot.client.core.gateway.logD
 import com.nanobot.client.settings.SettingsRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -31,7 +32,7 @@ class JvmTtsController(
 
     private var activeChatId: String? = null
     private var job: Job? = null
-    private var lastSpokenTurnId: String? = null
+    private val spokenTurns = mutableSetOf<String>()
     private var lastSpokenChatId: String? = null
     private var lastSpokenText: String = ""
     private var lastSpokenAt: Long = 0
@@ -62,35 +63,48 @@ class JvmTtsController(
     }
 
     override fun onAssistantFinal(chatId: String, text: String, turnId: String?) {
-        if (!settings.state.value.ttsEnabled) return
+        val enabled = settings.state.value.ttsEnabled && mutableState.value.enabled
+        logD("tts: final enabled=$enabled chat=$chatId turn=$turnId chars=${text.length}")
+        if (!enabled) return
         if (activeChatId != chatId) return
-        val now = System.currentTimeMillis()
-        // The gateway can emit turn_end twice (reconnect/duplicate events).
-        // Speak one final answer exactly once.
-        if (turnId != null && turnId == lastSpokenTurnId && chatId == lastSpokenChatId) return
-        if (
-            turnId == null &&
-            text == lastSpokenText &&
-            chatId == lastSpokenChatId &&
-            now - lastSpokenAt < 5_000
-        ) {
+
+        val turnKey = turnId?.let { "$chatId:$it" }
+        if (turnKey != null && !spokenTurns.add(turnKey)) {
+            logD("tts: skip duplicate turn=$turnKey")
             return
         }
-        lastSpokenTurnId = turnId
+        if (spokenTurns.size > 200) spokenTurns.clear()
+
+        val now = System.currentTimeMillis()
+        // Some gateways omit turn_id or send a second final event with a new id.
+        // Suppress the same text in the same chat within a short window.
+        if (
+            text == lastSpokenText &&
+            chatId == lastSpokenChatId &&
+            now - lastSpokenAt < 15_000
+        ) {
+            logD("tts: skip duplicate text chat=$chatId")
+            return
+        }
         lastSpokenChatId = chatId
         lastSpokenText = text
         lastSpokenAt = now
         speak(text)
     }
 
+    override fun setEnabled(enabled: Boolean) {
+        logD("tts: setEnabled=$enabled")
+        settings.update { it.copy(ttsEnabled = enabled) }
+        mutableState.value = mutableState.value.copy(enabled = enabled)
+        if (!enabled) stop()
+    }
+
     override fun toggle() {
-        val next = !settings.state.value.ttsEnabled
-        settings.update { it.copy(ttsEnabled = next) }
-        mutableState.value = mutableState.value.copy(enabled = next)
-        if (!next) stop()
+        setEnabled(!settings.state.value.ttsEnabled)
     }
 
     override fun stop() {
+        logD("tts: stop")
         job?.cancel()
         job = null
         player.stop()
@@ -103,8 +117,13 @@ class JvmTtsController(
     }
 
     private fun speak(text: String, force: Boolean = false) {
+        if (!force && (!settings.state.value.ttsEnabled || !mutableState.value.enabled)) {
+            logD("tts: speak blocked (disabled)")
+            return
+        }
         val currentSettings = settings.state.value
         val isLocalMode = currentSettings.ttsMode == "local"
+        logD("tts: speak force=$force mode=${currentSettings.ttsMode} chars=${text.length}")
 
         val config = TtsConfig(
             baseUrl = currentSettings.ttsBaseUrl,

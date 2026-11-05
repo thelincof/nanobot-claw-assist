@@ -582,6 +582,10 @@ class JvmAppController(
         tts.toggle()
     }
 
+    override fun setTtsEnabled(enabled: Boolean) {
+        tts.setEnabled(enabled)
+    }
+
     override fun stopSpeaking() {
         tts.stop()
     }
@@ -1370,9 +1374,12 @@ class JvmAppController(
             // Optimistic user messages never auto-expire in the canonical snapshot.
             if (canonical.isNotEmpty()) {
                 optimistic.clear()
-                // When we have canonical messages from server and are not actively generating,
-                // clear transient messages to prevent duplicate rendering of assistant replies.
-                if (mutableState.value.activeTurnId == null && !mutableState.value.sending) {
+                // When we have canonical messages from server and are not actively
+                // generating, clear transient messages to prevent duplicate
+                // rendering of assistant replies. Never drop a live stream that
+                // is still receiving deltas.
+                val hasLiveTransient = transient.values.any { it.isStreaming || it.reasoningStreaming }
+                if (mutableState.value.activeTurnId == null && !mutableState.value.sending && !hasLiveTransient) {
                     transient.clear()
                 }
             }
@@ -1602,7 +1609,7 @@ class JvmAppController(
         val finalText = message?.content?.takeIf { it.isNotBlank() }
             ?: canonical.firstOrNull { it.turnId == turnId && it.role == "assistant" }?.content.orEmpty()
         val chatId = currentChatId
-        if (chatId != null && finalText.isNotBlank()) {
+        if (chatId != null && finalText.isNotBlank() && mutableState.value.tts.enabled) {
             tts.onAssistantFinal(chatId, finalText, turnId)
             val title = mutableState.value.selectedSession?.title?.takeIf { it.isNotBlank() } ?: "Nanobot"
             val preview = finalText.trim().take(120)

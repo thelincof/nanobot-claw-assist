@@ -31,6 +31,7 @@ interface TtsController {
     val state: StateFlow<TtsUiState>
     fun setActiveChat(chatId: String?)
     fun onAssistantFinal(chatId: String, text: String, turnId: String? = null)
+    fun setEnabled(enabled: Boolean)
     fun toggle()
     fun stop()
     suspend fun test(text: String)

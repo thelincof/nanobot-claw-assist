@@ -1,5 +1,6 @@
 package com.nanobot.client.tts
 
+import java.util.concurrent.atomic.AtomicInteger
 import javax.sound.sampled.AudioFormat
 import javax.sound.sampled.AudioSystem
 import javax.sound.sampled.DataLine
@@ -8,11 +9,11 @@ import kotlin.math.min
 
 class DesktopAudioPlayer : AudioPlayer {
     @Volatile private var line: SourceDataLine? = null
-    @Volatile private var stopped = false
+    private val generation = AtomicInteger(0)
 
     override fun play(audio: PcmAudio) {
         if (audio.samples.isEmpty() || audio.sampleRate <= 0) return
-        stopped = false
+        val myGeneration = generation.incrementAndGet()
         val format = AudioFormat(audio.sampleRate.toFloat(), 16, audio.channels, true, false)
         val info = DataLine.Info(SourceDataLine::class.java, format)
         val output = try {
@@ -32,12 +33,12 @@ class DesktopAudioPlayer : AudioPlayer {
                 index += 2
             }
             var offset = 0
-            while (offset < bytes.size && !stopped) {
+            while (offset < bytes.size && myGeneration == generation.get()) {
                 val written = output.write(bytes, offset, min(4096, bytes.size - offset))
                 if (written <= 0) break
                 offset += written
             }
-            if (!stopped) output.drain()
+            if (myGeneration == generation.get()) output.drain()
         } catch (_: Exception) {
         } finally {
             try {
@@ -53,7 +54,7 @@ class DesktopAudioPlayer : AudioPlayer {
     }
 
     override fun stop() {
-        stopped = true
+        generation.incrementAndGet()
         val output = line
         try {
             output?.stop()

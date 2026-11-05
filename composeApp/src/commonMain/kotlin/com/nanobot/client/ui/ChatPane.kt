@@ -338,7 +338,7 @@ private fun MessageList(controller: AppController, state: AppState) {
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    itemsIndexed(messages, key = { index, message -> "${messageKey(message)}#$index" }) { _, message ->
+                    itemsIndexed(messages, key = { _, message -> messageKey(message) }) { _, message ->
                         MessageItem(
                             message = message,
                             mediaBaseUrl = state.settings.baseUrl,

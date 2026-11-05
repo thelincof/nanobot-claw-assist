@@ -17,6 +17,14 @@ object MessageProjector {
     private fun isToolRow(message: UiMessage): Boolean =
         message.role == "tool" || message.kind == "trace"
 
+    /** Empty assistant rows are stream/activity markers, not visible messages. */
+    private fun hasVisibleContent(message: UiMessage): Boolean =
+        message.content.isNotBlank() ||
+            !message.reasoning.isNullOrBlank() ||
+            !message.toolEvents.isNullOrEmpty() ||
+            !message.fileEdits.isNullOrEmpty() ||
+            !message.traces.isNullOrEmpty()
+
     private fun segmentKey(message: UiMessage): String =
         message.activitySegmentId?.takeIf { it.isNotBlank() }
             ?: message.turnId?.takeIf { it.isNotBlank() }
@@ -109,7 +117,7 @@ object MessageProjector {
             val transientMessage = transientByTurnId ?: transientById
             val useTransient = transientMessage != null &&
                 message.role == "assistant" &&
-                (transientMessage.isStreaming || message.content.isBlank()) &&
+                (transientMessage.isStreaming || !hasVisibleContent(message)) &&
                 (
                     transientMessage.content.isNotBlank() ||
                         transientMessage.toolEvents != null ||
@@ -120,10 +128,22 @@ object MessageProjector {
         }
 
         transient.forEach { (turnId, message) ->
-            val inCanonicalByTurnId = canonical.any { it.turnId == turnId && it.role == "assistant" }
+            // Do not suppress a live streaming message just because the
+            // canonical snapshot currently has an empty assistant marker.
+            val inCanonicalByTurnId = canonical.any {
+                it.turnId == turnId && it.role == "assistant" && hasVisibleContent(it)
+            }
             val inCanonicalById = message.id.isNotBlank() && canonicalById.containsKey(message.id)
             if (!inCanonicalByTurnId && !inCanonicalById) {
-                result += message
+                val hasCanonicalTools = canonical.any { isToolRow(it) && it.turnId == turnId }
+                val candidate = if (hasCanonicalTools) {
+                    // Canonical activity rows already render these tools; keeping
+                    // the transient copy would show the same tool twice.
+                    message.copy(toolEvents = null, fileEdits = null, traces = null)
+                } else {
+                    message
+                }
+                if (hasVisibleContent(candidate)) result += candidate
             }
         }
 

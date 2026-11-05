@@ -1,5 +1,6 @@
 package com.nanobot.client
 
+import com.nanobot.client.app.MessageProjector
 import com.nanobot.client.audio.cleanAsrText
 import com.nanobot.client.audio.encodeWav
 import com.nanobot.client.core.gateway.UrlResult
@@ -7,6 +8,7 @@ import com.nanobot.client.core.gateway.buildWebSocketUrl
 import com.nanobot.client.core.gateway.normalizeBaseUrl
 import com.nanobot.client.core.model.BootstrapResponse
 import com.nanobot.client.core.model.InboundEvent
+import com.nanobot.client.core.model.UiMessage
 import com.nanobot.client.core.model.parseInboundEvent
 import com.nanobot.client.hotword.buildVoskGrammar
 import com.nanobot.client.hotword.normalizeHotwordPhrase
@@ -98,6 +100,36 @@ class CoreTest {
         assertTrue(chunks.size > 1)
         assertTrue(chunks.all { it.length <= 120 })
         assertNotNull(chunks.firstOrNull())
+    }
+
+    @Test
+    fun keepsStreamingReasoningWhenCanonicalHasEmptyMarker() {
+        val turn = "turn-1"
+        val canonical = listOf(
+            UiMessage(
+                id = "canonical-empty",
+                role = "assistant",
+                content = "",
+                turnId = turn,
+                createdAt = 1,
+            ),
+        )
+        val transient = mapOf(
+            turn to UiMessage(
+                id = turn,
+                role = "assistant",
+                content = "",
+                reasoning = "thinking",
+                turnId = turn,
+                isStreaming = true,
+                createdAt = 2,
+            ),
+        )
+
+        val projected = MessageProjector.project(canonical, transient, emptyMap())
+
+        assertEquals(1, projected.size)
+        assertEquals("thinking", projected.single().reasoning)
     }
 
     @Test

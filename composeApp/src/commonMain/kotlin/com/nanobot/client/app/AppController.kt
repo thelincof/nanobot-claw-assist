@@ -103,6 +103,7 @@ interface AppController {
     fun send(text: String, attachments: List<LocalAttachment> = emptyList())
     fun stopTurn()
     fun toggleTts()
+    fun setTtsEnabled(enabled: Boolean)
     fun stopSpeaking()
     fun speakText(text: String)
     fun startVoice()

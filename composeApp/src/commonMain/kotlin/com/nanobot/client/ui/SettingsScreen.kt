@@ -429,7 +429,13 @@ private fun AppSettingsTab(controller: AppController, state: AppState) {
                     Text(stringResource(Res.string.tts_enabled), style = MaterialTheme.typography.bodyMedium)
                     Text(stringResource(Res.string.tts_enabled_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Switch(checked = draft.ttsEnabled, onCheckedChange = { draft = draft.copy(ttsEnabled = it) })
+                Switch(
+                    checked = draft.ttsEnabled,
+                    onCheckedChange = { enabled ->
+                        draft = draft.copy(ttsEnabled = enabled)
+                        controller.setTtsEnabled(enabled)
+                    },
+                )
             }
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

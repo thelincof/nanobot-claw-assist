@@ -3,16 +3,17 @@ package com.nanobot.client.tts
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.max
 import kotlin.math.min
 
 class AndroidAudioPlayer : AudioPlayer {
     @Volatile private var track: AudioTrack? = null
-    @Volatile private var stopped = false
+    private val generation = AtomicInteger(0)
 
     override fun play(audio: PcmAudio) {
         if (audio.samples.isEmpty() || audio.sampleRate <= 0) return
-        stopped = false
+        val myGeneration = generation.incrementAndGet()
         val channelMask = if (audio.channels == 2) AudioFormat.CHANNEL_OUT_STEREO else AudioFormat.CHANNEL_OUT_MONO
         val minBuffer = AudioTrack.getMinBufferSize(
             audio.sampleRate,
@@ -45,13 +46,13 @@ class AndroidAudioPlayer : AudioPlayer {
         try {
             player.play()
             var offset = 0
-            while (offset < audio.samples.size && !stopped) {
+            while (offset < audio.samples.size && myGeneration == generation.get()) {
                 val count = min(4096, audio.samples.size - offset)
                 val written = player.write(audio.samples, offset, count)
                 if (written <= 0) break
                 offset += written
             }
-            if (!stopped) player.stop()
+            if (myGeneration == generation.get()) player.stop()
         } catch (_: Exception) {
         } finally {
             try {
@@ -63,7 +64,7 @@ class AndroidAudioPlayer : AudioPlayer {
     }
 
     override fun stop() {
-        stopped = true
+        generation.incrementAndGet()
         val player = track
         try {
             player?.pause()
