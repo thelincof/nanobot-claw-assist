@@ -38,6 +38,7 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -68,6 +69,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nanobot.client.app.AppController
+import com.nanobot.client.app.ChatGroup
 import com.nanobot.client.app.defaultWorkspacePathOf
 import com.nanobot.client.app.AppState
 import com.nanobot.client.app.ConnectionPhase
@@ -133,9 +135,13 @@ fun Sidebar(
     onOpenAutomations: () -> Unit = {},
 ) {
     var pendingDelete by remember { mutableStateOf<SessionRow?>(null) }
+    var pendingDeleteMany by remember { mutableStateOf<List<SessionRow>?>(null) }
     var pendingRename by remember { mutableStateOf<SessionRow?>(null) }
     var showAddWorkspace by remember { mutableStateOf(false) }
     var pendingDeleteWorkspace by remember { mutableStateOf<WorkspaceEntry?>(null) }
+    var selectionMode by remember { mutableStateOf(false) }
+    var selectedKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var groupDialogSession by remember { mutableStateOf<SessionRow?>(null) }
     val query = state.search.trim()
     val workspaceFiltered = remember(state.sessions, state.showAllChats, state.workspacesInfo, state.settings.activeWorkspacePath) {
         filterSessionsByWorkspace(state)
@@ -155,8 +161,9 @@ fun Sidebar(
     }
     val archivedCount = sessions.count { it.key in state.archivedKeys }
     val visibleSessions = sessions.filter { state.showArchived || it.key !in state.archivedKeys }
-    val pinnedSessions = visibleSessions.filter { it.key in state.pinnedKeys }
-    val regularSessions = visibleSessions.filter { it.key !in state.pinnedKeys }
+    val groupedKeys = state.chatGroups.flatMap { it.sessionKeys }.toSet()
+    val pinnedSessions = visibleSessions.filter { it.key in state.pinnedKeys && it.key !in groupedKeys }
+    val regularSessions = visibleSessions.filter { it.key !in state.pinnedKeys && it.key !in groupedKeys }
 
     Column(
         modifier = modifier
@@ -275,6 +282,53 @@ fun Sidebar(
                     }
                 }
             } else {
+                state.chatGroups.forEach { group ->
+                    val groupSessions = group.sessionKeys.mapNotNull { key ->
+                        visibleSessions.firstOrNull { it.key == key }
+                    }
+                    if (groupSessions.isNotEmpty()) {
+                        item(key = "group-header-${group.key}") {
+                            Text(
+                                group.title,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = LocalWebUiColors.current.sidebarMuted,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+                            )
+                        }
+                        items(groupSessions, key = { "group-${group.key}-${it.key}" }) { session ->
+                            SessionRowItem(
+                                session = session,
+                                selected = state.selectedSession?.key == session.key,
+                                running = session.running && state.chatId != session.chatId,
+                                pinned = session.key in state.pinnedKeys,
+                                archived = session.key in state.archivedKeys,
+                                darkTheme = darkTheme,
+                                selectionMode = selectionMode,
+                                selectedForSelection = session.key in selectedKeys,
+                                onClick = {
+                                    controller.openSession(session)
+                                    onClose()
+                                },
+                                onToggleSelection = {
+                                    selectedKeys = if (session.key in selectedKeys) {
+                                        selectedKeys - session.key
+                                    } else {
+                                        selectedKeys + session.key
+                                    }
+                                },
+                                onStartSelection = {
+                                    selectionMode = true
+                                    selectedKeys = selectedKeys + session.key
+                                },
+                                onTogglePin = { controller.togglePin(session) },
+                                onRename = { pendingRename = session },
+                                onToggleArchive = { controller.toggleArchive(session) },
+                                onGroup = { groupDialogSession = session },
+                                onDelete = { pendingDelete = session },
+                            )
+                        }
+                    }
+                }
                 if (pinnedSessions.isNotEmpty()) {
                     item(key = "pinned-header") { SessionSectionLabel(stringResource(Res.string.pinned_chats)) }
                     items(pinnedSessions, key = { it.key }) { session ->
@@ -285,13 +339,27 @@ fun Sidebar(
                             pinned = true,
                             archived = session.key in state.archivedKeys,
                             darkTheme = darkTheme,
+                            selectionMode = selectionMode,
+                            selectedForSelection = session.key in selectedKeys,
                             onClick = {
                                 controller.openSession(session)
                                 onClose()
                             },
+                            onToggleSelection = {
+                                selectedKeys = if (session.key in selectedKeys) {
+                                    selectedKeys - session.key
+                                } else {
+                                    selectedKeys + session.key
+                                }
+                            },
+                            onStartSelection = {
+                                selectionMode = true
+                                selectedKeys = selectedKeys + session.key
+                            },
                             onTogglePin = { controller.togglePin(session) },
                             onRename = { pendingRename = session },
                             onToggleArchive = { controller.toggleArchive(session) },
+                            onGroup = { groupDialogSession = session },
                             onDelete = { pendingDelete = session },
                         )
                     }
@@ -305,13 +373,27 @@ fun Sidebar(
                             pinned = false,
                             archived = session.key in state.archivedKeys,
                             darkTheme = darkTheme,
+                            selectionMode = selectionMode,
+                            selectedForSelection = session.key in selectedKeys,
                             onClick = {
                                 controller.openSession(session)
                                 onClose()
                             },
+                            onToggleSelection = {
+                                selectedKeys = if (session.key in selectedKeys) {
+                                    selectedKeys - session.key
+                                } else {
+                                    selectedKeys + session.key
+                                }
+                            },
+                            onStartSelection = {
+                                selectionMode = true
+                                selectedKeys = selectedKeys + session.key
+                            },
                             onTogglePin = { controller.togglePin(session) },
                             onRename = { pendingRename = session },
                             onToggleArchive = { controller.toggleArchive(session) },
+                            onGroup = { groupDialogSession = session },
                             onDelete = { pendingDelete = session },
                         )
                     }
@@ -331,6 +413,41 @@ fun Sidebar(
                             style = MaterialTheme.typography.labelMedium,
                         )
                     }
+                }
+            }
+        }
+
+        if (selectionMode) {
+            Row(
+                Modifier.fillMaxWidth().padding(top = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(Res.string.chat_selected_count, selectedKeys.size),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = LocalWebUiColors.current.sidebarContent,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    enabled = selectedKeys.isNotEmpty(),
+                    onClick = {
+                        pendingDeleteMany = visibleSessions.filter { it.key in selectedKeys }
+                    },
+                ) {
+                    Text(
+                        stringResource(Res.string.delete),
+                        color = if (selectedKeys.isEmpty()) {
+                            LocalWebUiColors.current.sidebarMuted
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        },
+                    )
+                }
+                IconButton(onClick = {
+                    selectionMode = false
+                    selectedKeys = emptySet()
+                }) {
+                    Icon(Icons.Rounded.Close, contentDescription = stringResource(Res.string.cancel))
                 }
             }
         }
@@ -365,6 +482,43 @@ fun Sidebar(
             dismissButton = {
                 TextButton(onClick = { pendingDelete = null }) { Text(stringResource(Res.string.cancel)) }
             },
+        )
+    }
+
+    pendingDeleteMany?.let { items ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteMany = null },
+            title = { Text(stringResource(Res.string.delete_chats_title)) },
+            text = { Text(stringResource(Res.string.delete_chats_text, items.size)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    controller.deleteSessions(items)
+                    pendingDeleteMany = null
+                    selectionMode = false
+                    selectedKeys = emptySet()
+                }) { Text(stringResource(Res.string.delete)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteMany = null }) {
+                    Text(stringResource(Res.string.cancel))
+                }
+            },
+        )
+    }
+
+    groupDialogSession?.let { session ->
+        ChatGroupDialog(
+            session = session,
+            groups = state.chatGroups,
+            onMove = { key ->
+                controller.moveSessionToGroup(session, key)
+                groupDialogSession = null
+            },
+            onCreate = { title ->
+                controller.createChatGroup(session, title)
+                groupDialogSession = null
+            },
+            onDismiss = { groupDialogSession = null },
         )
     }
 
@@ -674,6 +828,57 @@ private fun AddWorkspaceDialog(
 }
 
 @Composable
+private fun ChatGroupDialog(
+    session: SessionRow,
+    groups: List<ChatGroup>,
+    onMove: (String?) -> Unit,
+    onCreate: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(Res.string.group_dialog_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    stringResource(Res.string.group_dialog_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(onClick = { onMove(null) }, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(Res.string.group_no_group))
+                }
+                groups.forEach { group ->
+                    TextButton(onClick = { onMove(group.key) }, modifier = Modifier.fillMaxWidth()) {
+                        Text(group.title)
+                    }
+                }
+                HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text(stringResource(Res.string.group_name)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                TextButton(
+                    onClick = { onCreate(name) },
+                    enabled = name.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(Res.string.group_create))
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(Res.string.cancel)) }
+        },
+    )
+}
+
+@Composable
 private fun RenameDialog(
     session: SessionRow,
     onDismiss: () -> Unit,
@@ -806,10 +1011,15 @@ private fun SessionRowItem(
     pinned: Boolean,
     archived: Boolean,
     darkTheme: Boolean,
+    selectionMode: Boolean,
+    selectedForSelection: Boolean,
     onClick: () -> Unit,
+    onToggleSelection: () -> Unit,
+    onStartSelection: () -> Unit,
     onTogglePin: () -> Unit,
     onRename: () -> Unit,
     onToggleArchive: () -> Unit,
+    onGroup: () -> Unit,
     onDelete: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
@@ -820,7 +1030,9 @@ private fun SessionRowItem(
             modifier = Modifier
                 .fillMaxWidth()
                 .combinedClickable(
-                    onClick = onClick,
+                    onClick = {
+                        if (selectionMode) onToggleSelection() else onClick()
+                    },
                     onLongClick = { menuOpen = true },
                 ),
         ) {
@@ -828,6 +1040,13 @@ private fun SessionRowItem(
                 Modifier.padding(start = 10.dp, top = 7.dp, bottom = 7.dp, end = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (selectionMode) {
+                    Checkbox(
+                        checked = selectedForSelection,
+                        onCheckedChange = { onToggleSelection() },
+                    )
+                    Spacer(Modifier.width(4.dp))
+                }
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         session.handle?.takeIf { it.name.isNotBlank() }?.let { handle ->
@@ -892,13 +1111,15 @@ private fun SessionRowItem(
                         color = Color(0xFF3B82F6),
                     )
                 }
-                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(30.dp)) {
-                    Icon(
-                        Icons.Rounded.MoreVert,
-                        contentDescription = stringResource(Res.string.chat_menu),
-                        tint = LocalWebUiColors.current.sidebarMuted,
-                        modifier = Modifier.size(18.dp),
-                    )
+                if (!selectionMode) {
+                    IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(30.dp)) {
+                        Icon(
+                            Icons.Rounded.MoreVert,
+                            contentDescription = stringResource(Res.string.chat_menu),
+                            tint = LocalWebUiColors.current.sidebarMuted,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
                 }
             }
         }
@@ -927,6 +1148,26 @@ private fun SessionRowItem(
                     )
                 },
                 onClick = { menuOpen = false; onToggleArchive() },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(Res.string.chat_add_to_group)) },
+                leadingIcon = {
+                    Icon(Icons.Rounded.Folder, contentDescription = null, modifier = Modifier.size(18.dp))
+                },
+                onClick = {
+                    menuOpen = false
+                    onGroup()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(Res.string.chat_select)) },
+                leadingIcon = {
+                    Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                },
+                onClick = {
+                    menuOpen = false
+                    onStartSelection()
+                },
             )
             DropdownMenuItem(
                 text = { Text(stringResource(Res.string.delete), color = MaterialTheme.colorScheme.error) },

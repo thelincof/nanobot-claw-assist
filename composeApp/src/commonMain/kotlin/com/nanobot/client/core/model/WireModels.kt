@@ -241,8 +241,10 @@ data class ThreadPage(
 @Serializable
 data class GoalStatePayload(
     val active: Boolean = false,
+    val status: String? = null,
     @SerialName("ui_summary") val uiSummary: String? = null,
     val objective: String? = null,
+    val recap: String? = null,
 )
 
 @Serializable

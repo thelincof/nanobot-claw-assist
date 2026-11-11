@@ -2,6 +2,7 @@ package com.nanobot.client.app
 
 import com.nanobot.client.audio.VoiceUiState
 import com.nanobot.client.core.model.AutomationJob
+import com.nanobot.client.core.model.GoalStatePayload
 import com.nanobot.client.core.model.McpPresetItem
 import com.nanobot.client.core.model.LocalAttachment
 import com.nanobot.client.core.model.ModelPresetItem
@@ -20,6 +21,13 @@ data class ConnectionUi(
     val error: String? = null,
 )
 
+/** UI-only chat group from the gateway sidebar workbench state. */
+data class ChatGroup(
+    val key: String,
+    val title: String,
+    val sessionKeys: List<String>,
+)
+
 data class AppState(
     val connection: ConnectionUi = ConnectionUi(),
     val settings: AppSettings = AppSettings(),
@@ -32,6 +40,7 @@ data class AppState(
     val sessions: List<SessionRow> = emptyList(),
     val sessionsLoading: Boolean = false,
     val sessionsError: String? = null,
+    val chatGroups: List<ChatGroup> = emptyList(),
     val search: String = "",
     val selectedSession: SessionRow? = null,
     val chatId: String? = null,
@@ -55,6 +64,11 @@ data class AppState(
     val providers: List<ProviderItem> = emptyList(),
     val modelsLoading: Boolean = false,
     val contextUsage: com.nanobot.client.core.model.ContextUsagePayload? = null,
+    /** Persisted sustained-goal state for the open chat. */
+    val goal: GoalStatePayload = GoalStatePayload(),
+    /** Runtime status from goal_status (e.g. running); separate from persisted goal. */
+    val goalStatus: String? = null,
+    val goalStartedAt: Double? = null,
     val gatewayConfigRaw: String? = null,
     /** Structured runtime_config for the parameter form (39 settings). */
     val runtimeConfig: JsonObject? = null,
@@ -97,9 +111,12 @@ interface AppController {
     fun setShowArchived(show: Boolean)
     fun togglePin(session: SessionRow)
     fun toggleArchive(session: SessionRow)
+    fun createChatGroup(session: SessionRow, title: String)
+    fun moveSessionToGroup(session: SessionRow, groupKey: String?)
     fun openSession(session: SessionRow)
     fun newChat()
     fun deleteSession(session: SessionRow)
+    fun deleteSessions(sessions: List<SessionRow>)
     fun send(text: String, attachments: List<LocalAttachment> = emptyList())
     fun stopTurn()
     fun toggleTts()

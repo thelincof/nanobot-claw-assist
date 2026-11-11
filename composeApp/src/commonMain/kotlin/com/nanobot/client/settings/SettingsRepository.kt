@@ -1,5 +1,6 @@
 package com.nanobot.client.settings
 
+import com.nanobot.client.core.model.SessionRow
 import com.russhwolf.settings.Settings
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,6 +34,7 @@ data class AppSettings(
     val assistantAutoListen: Boolean = true,
     val hotwordEnabled: Boolean = false,
     val hotwordPhrase: String = "клод",
+    val goalVoicePhrase: String = "задача",
 )
 
 @Serializable
@@ -73,6 +75,7 @@ class SettingsRepository(private val settings: Settings) {
         assistantAutoListen = settings.getBoolean(KEY_ASSISTANT_AUTO_LISTEN, true),
         hotwordEnabled = settings.getBoolean(KEY_HOTWORD_ENABLED, false),
         hotwordPhrase = settings.getString(KEY_HOTWORD_PHRASE, "клод"),
+        goalVoicePhrase = settings.getString(KEY_GOAL_VOICE_PHRASE, "задача"),
     )
 
     fun update(transform: (AppSettings) -> AppSettings) {
@@ -102,13 +105,41 @@ class SettingsRepository(private val settings: Settings) {
         settings.putBoolean(KEY_ASSISTANT_AUTO_LISTEN, next.assistantAutoListen)
         settings.putBoolean(KEY_HOTWORD_ENABLED, next.hotwordEnabled)
         settings.putString(KEY_HOTWORD_PHRASE, next.hotwordPhrase)
+        settings.putString(KEY_GOAL_VOICE_PHRASE, next.goalVoicePhrase)
         mutableState.value = next
     }
 
     fun setLastSession(key: String?) = update { it.copy(lastSessionKey = key) }
 
+    /** Persisted chat list so the sidebar is usable immediately on cold start. */
+    fun cachedSessions(): List<SessionRow> = runCatching {
+        sessionJson.decodeFromString(
+            ListSerializer(SessionRow.serializer()),
+            settings.getString(KEY_SESSIONS_CACHE, "[]"),
+        )
+    }.getOrDefault(emptyList())
+
+    fun setCachedSessions(sessions: List<SessionRow>) {
+        runCatching {
+            settings.putString(
+                KEY_SESSIONS_CACHE,
+                sessionJson.encodeToString(ListSerializer(SessionRow.serializer()), sessions.take(500)),
+            )
+        }
+    }
+
+    fun cachedPinnedKeys(): Set<String> = cachedStringSet(KEY_PINNED_CACHE)
+    fun setCachedPinnedKeys(keys: Set<String>) = settings.putString(KEY_PINNED_CACHE, keys.joinToString("\u0001"))
+
+    fun cachedArchivedKeys(): Set<String> = cachedStringSet(KEY_ARCHIVED_CACHE)
+    fun setCachedArchivedKeys(keys: Set<String>) = settings.putString(KEY_ARCHIVED_CACHE, keys.joinToString("\u0001"))
+
+    private fun cachedStringSet(key: String): Set<String> =
+        settings.getString(key, "").split('\u0001').filter { it.isNotBlank() }.toSet()
+
     private companion object {
         val workspaceJson = Json { ignoreUnknownKeys = true }
+        val sessionJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
         const val KEY_BASE_URL = "gateway.baseUrl"
         const val KEY_SECRET = "gateway.secret"
         const val KEY_THEME_MODE = "ui.themeMode"
@@ -132,6 +163,10 @@ class SettingsRepository(private val settings: Settings) {
         const val KEY_ASSISTANT_AUTO_LISTEN = "assistant.autoListen"
         const val KEY_HOTWORD_ENABLED = "assistant.hotwordEnabled"
         const val KEY_HOTWORD_PHRASE = "assistant.hotwordPhrase"
+        const val KEY_GOAL_VOICE_PHRASE = "assistant.goalVoicePhrase"
+        const val KEY_SESSIONS_CACHE = "sessions.cache"
+        const val KEY_PINNED_CACHE = "sessions.pinned"
+        const val KEY_ARCHIVED_CACHE = "sessions.archived"
     }
 }
 

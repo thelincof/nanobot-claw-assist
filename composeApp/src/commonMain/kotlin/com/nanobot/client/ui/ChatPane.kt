@@ -152,6 +152,13 @@ fun ChatPane(
             }
         }
 
+        if (state.selectedSession != null && (state.goal.active || state.goal.status == "blocked")) {
+            GoalStrip(
+                goal = state.goal,
+                runtimeStatus = state.goalStatus,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+            )
+        }
         ChatComposer(controller, state, micPermission)
     }
 }

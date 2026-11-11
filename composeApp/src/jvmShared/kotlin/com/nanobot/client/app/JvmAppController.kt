@@ -14,6 +14,7 @@ import com.nanobot.client.core.gateway.logD
 import com.nanobot.client.core.model.AutomationJob
 import com.nanobot.client.core.model.DeltaEvent
 import com.nanobot.client.core.model.FileEditEvent
+import com.nanobot.client.core.model.GoalStatePayload
 import com.nanobot.client.core.model.InboundEvent
 import com.nanobot.client.core.model.LocalAttachment
 import com.nanobot.client.core.model.MessageEvent
@@ -28,6 +29,7 @@ import com.nanobot.client.core.model.StreamEndEvent
 import com.nanobot.client.core.model.ToolProgressEvent
 import com.nanobot.client.core.model.TurnEndEvent
 import com.nanobot.client.core.model.UiFileEdit
+import com.nanobot.client.goal.goalCommandFromVoice
 import com.nanobot.client.core.model.UiMessage
 import com.nanobot.client.platform.notifyTaskCompleted
 import com.nanobot.client.settings.AppSettings
@@ -53,6 +55,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -71,7 +74,14 @@ class JvmAppController(
     private val recorder: VoiceRecorder = createVoiceRecorder(),
 ) : AppController {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val mutableState = MutableStateFlow(AppState(settings = settings.state.value))
+    private val mutableState = MutableStateFlow(
+        AppState(
+            settings = settings.state.value,
+            sessions = settings.cachedSessions(),
+            pinnedKeys = settings.cachedPinnedKeys(),
+            archivedKeys = settings.cachedArchivedKeys(),
+        ),
+    )
     override val state: StateFlow<AppState> = mutableState.asStateFlow()
 
     private var started = false
@@ -227,7 +237,6 @@ class JvmAppController(
         update {
             it.copy(
                 connection = ConnectionUi(ConnectionPhase.IDLE),
-                sessions = emptyList(),
                 sessionsLoading = false,
                 sessionsError = null,
                 error = null,
@@ -257,6 +266,7 @@ class JvmAppController(
                     payload.sessions
                 }
                 update { it.copy(sessions = merged, sessionsLoading = false) }
+                cacheSessions(merged)
                 val selected = mutableState.value.selectedSession
                 if (selected != null) {
                     val fresh = merged.firstOrNull { it.key == selected.key }
@@ -269,6 +279,10 @@ class JvmAppController(
                 update { it.copy(sessionsLoading = false, sessionsError = error.message ?: "Не удалось загрузить чаты") }
             }
         }
+    }
+
+    private fun cacheSessions(sessions: List<SessionRow>) {
+        settings.setCachedSessions(sessions)
     }
 
     override fun setSearch(query: String) {
@@ -370,6 +384,7 @@ class JvmAppController(
             if (mutableState.value.selectedSession?.key == session.key) {
                 update { it.copy(selectedSession = it.selectedSession?.copy(title = title)) }
             }
+            cacheSessions(mutableState.value.sessions)
         }
     }
 
@@ -384,10 +399,15 @@ class JvmAppController(
     private fun loadSidebarState() {
         scope.launch {
             val raw = runCatching { gateway.api().sidebarStateRaw() }.getOrNull() ?: return@launch
+            val pinned = raw.stringSet("pinned_keys")
+            val archived = raw.stringSet("archived_keys")
+            settings.setCachedPinnedKeys(pinned)
+            settings.setCachedArchivedKeys(archived)
             update {
                 it.copy(
-                    pinnedKeys = raw.stringSet("pinned_keys"),
-                    archivedKeys = raw.stringSet("archived_keys"),
+                    pinnedKeys = pinned,
+                    archivedKeys = archived,
+                    chatGroups = parseChatGroups(raw),
                 )
             }
         }
@@ -408,6 +428,7 @@ class JvmAppController(
                     buildJsonObject { put("state", updated) },
                 )
                 update { it.copy(pinnedKeys = pinned) }
+                settings.setCachedPinnedKeys(pinned)
             } catch (error: Exception) {
                 update { it.copy(error = error.message ?: "Не удалось изменить закрепление") }
             }
@@ -429,9 +450,98 @@ class JvmAppController(
                     buildJsonObject { put("state", updated) },
                 )
                 update { it.copy(archivedKeys = archived) }
+                settings.setCachedArchivedKeys(archived)
             } catch (error: Exception) {
                 update { it.copy(error = error.message ?: "Не удалось изменить архив") }
             }
+        }
+    }
+
+    override fun createChatGroup(session: SessionRow, title: String) {
+        val cleanTitle = title.trim().ifBlank { "Группа" }
+        scope.launch {
+            try {
+                val raw = gateway.api().sidebarStateRaw()
+                val workbench = (raw["workbench"] as? JsonObject) ?: JsonObject(emptyMap())
+                val tabs = (workbench["tabs"] as? JsonObject) ?: JsonObject(emptyMap())
+                val key = "tab-${UUID.randomUUID().toString().take(8)}"
+                val tab = buildJsonObject {
+                    put("explicit", true)
+                    put("title", cleanTitle)
+                    put("paneKeys", JsonArray(listOf(JsonPrimitive(session.key))))
+                    put("layoutPaneKeys", JsonArray(listOf(JsonPrimitive(session.key))))
+                    put("layout", "columns")
+                    put("splitRatios", JsonArray(emptyList()))
+                }
+                val newWorkbench = JsonObject(
+                    workbench + mapOf(
+                        "version" to JsonPrimitive(1),
+                        "tabs" to JsonObject(tabs + (key to tab)),
+                    ),
+                )
+                val updated = JsonObject(raw + ("workbench" to newWorkbench))
+                gateway.transport().webUiRequest("sidebar.update", buildJsonObject { put("state", updated) })
+                update { it.copy(chatGroups = parseChatGroups(updated)) }
+            } catch (error: Exception) {
+                update { it.copy(error = error.message ?: "Не удалось создать группу") }
+            }
+        }
+    }
+
+    override fun moveSessionToGroup(session: SessionRow, groupKey: String?) {
+        scope.launch {
+            try {
+                val raw = gateway.api().sidebarStateRaw()
+                val workbench = (raw["workbench"] as? JsonObject) ?: JsonObject(emptyMap())
+                val tabs = (workbench["tabs"] as? JsonObject) ?: JsonObject(emptyMap())
+                val newTabs = LinkedHashMap<String, JsonElement>()
+                tabs.forEach { (key, value) ->
+                    val tab = value as? JsonObject ?: return@forEach
+                    val panes = tab.stringList("paneKeys").filterNot { it == session.key }
+                    val layoutPanes = tab.stringList("layoutPaneKeys").filterNot { it == session.key }
+                    newTabs[key] = JsonObject(
+                        tab + mapOf(
+                            "paneKeys" to JsonArray(panes.map { JsonPrimitive(it) }),
+                            "layoutPaneKeys" to JsonArray(layoutPanes.map { JsonPrimitive(it) }),
+                        ),
+                    )
+                }
+                if (groupKey != null && newTabs[groupKey] is JsonObject) {
+                    val tab = newTabs[groupKey] as JsonObject
+                    val panes = tab.stringList("paneKeys") + session.key
+                    val layoutPanes = tab.stringList("layoutPaneKeys") + session.key
+                    newTabs[groupKey] = JsonObject(
+                        tab + mapOf(
+                            "paneKeys" to JsonArray(panes.distinct().map { JsonPrimitive(it) }),
+                            "layoutPaneKeys" to JsonArray(layoutPanes.distinct().map { JsonPrimitive(it) }),
+                        ),
+                    )
+                }
+                val newWorkbench = JsonObject(
+                    workbench + mapOf(
+                        "version" to JsonPrimitive(1),
+                        "tabs" to JsonObject(newTabs),
+                    ),
+                )
+                val updated = JsonObject(raw + ("workbench" to newWorkbench))
+                gateway.transport().webUiRequest("sidebar.update", buildJsonObject { put("state", updated) })
+                update { it.copy(chatGroups = parseChatGroups(updated)) }
+            } catch (error: Exception) {
+                update { it.copy(error = error.message ?: "Не удалось изменить группу") }
+            }
+        }
+    }
+
+    private fun parseChatGroups(raw: JsonObject): List<ChatGroup> {
+        val tabs = ((raw["workbench"] as? JsonObject)?.get("tabs") as? JsonObject) ?: return emptyList()
+        return tabs.mapNotNull { (key, element) ->
+            val tab = element as? JsonObject ?: return@mapNotNull null
+            val panes = tab.stringList("paneKeys")
+            if (panes.isEmpty()) return@mapNotNull null
+            val explicit = (tab["explicit"] as? JsonPrimitive)?.booleanOrNull == true
+            if (!explicit && panes.size <= 1) return@mapNotNull null
+            val title = (tab["title"] as? JsonPrimitive)?.contentOrNull.orEmpty().ifBlank { "Группа" }
+            ChatGroup(key = key, title = title, sessionKeys = panes)
         }
     }
 
@@ -485,6 +595,9 @@ class JvmAppController(
                 stopping = false,
                 error = null,
                 contextUsage = null,
+                goal = GoalStatePayload(),
+                goalStatus = null,
+                goalStartedAt = null,
             )
         }
         settings.setLastSession(session.key)
@@ -499,33 +612,43 @@ class JvmAppController(
     }
 
     override fun deleteSession(session: SessionRow) {
+        scope.launch { deleteSessionInternal(session) }
+    }
+
+    override fun deleteSessions(sessions: List<SessionRow>) {
+        if (sessions.isEmpty()) return
         scope.launch {
-            try {
-                // Nanobot rejects WebUI mutations over plain HTTP (the server closes
-                // the connection -> IOException -> "network"). Deletion must go
-                // through the authenticated WebSocket.
-                gateway.transport().webUiRequest(
-                    "session.delete",
-                    buildJsonObject { put("key", session.key) },
-                )
-            } catch (error: GatewayException) {
-                if (error.status != 404) {
-                    update { it.copy(error = error.message ?: "Не удалось удалить чат") }
-                    return@launch
-                }
-            } catch (error: IllegalStateException) {
-                update { it.copy(error = "Нет соединения с шлюзом. Попробуйте ещё раз.") }
-                return@launch
-            } catch (error: Exception) {
+            sessions.forEach { session -> deleteSessionInternal(session) }
+        }
+    }
+
+    private suspend fun deleteSessionInternal(session: SessionRow) {
+        try {
+            // Nanobot rejects WebUI mutations over plain HTTP (the server closes
+            // the connection -> IOException -> "network"). Deletion must go
+            // through the authenticated WebSocket.
+            gateway.transport().webUiRequest(
+                "session.delete",
+                buildJsonObject { put("key", session.key) },
+            )
+        } catch (error: GatewayException) {
+            if (error.status != 404) {
                 update { it.copy(error = error.message ?: "Не удалось удалить чат") }
-                return@launch
+                return
             }
-            update { it.copy(sessions = it.sessions.filterNot { row -> row.key == session.key }) }
-            if (mutableState.value.selectedSession?.key == session.key) {
-                clearChatState()
-                settings.setLastSession(null)
-                update { it.copy(selectedSession = null, chatId = null, messages = emptyList()) }
-            }
+        } catch (error: IllegalStateException) {
+            update { it.copy(error = "Нет соединения с шлюзом. Попробуйте ещё раз.") }
+            return
+        } catch (error: Exception) {
+            update { it.copy(error = error.message ?: "Не удалось удалить чат") }
+            return
+        }
+        update { it.copy(sessions = it.sessions.filterNot { row -> row.key == session.key }) }
+        cacheSessions(mutableState.value.sessions)
+        if (mutableState.value.selectedSession?.key == session.key) {
+            clearChatState()
+            settings.setLastSession(null)
+            update { it.copy(selectedSession = null, chatId = null, messages = emptyList()) }
         }
     }
 
@@ -655,15 +778,23 @@ class JvmAppController(
                     return@launch
                 }
                 update { it.copy(lastTranscription = text) }
+                // Voice can start a sustained goal: "задача ..." (configurable).
+                // Works both from the mic button and after the "Клод" hotword.
+                val goalCommand = goalCommandFromVoice(
+                    transcript = text,
+                    triggerPhrase = s.goalVoicePhrase,
+                    wakeWord = s.hotwordPhrase,
+                )
+                val outgoing = goalCommand ?: text
+                logD("assistant: transcript ready, goal=${goalCommand != null}, resolving chat (ws=${mutableState.value.wsConnected})")
                 // The chat is resolved after speaking, so a slow WebSocket/new-chat
                 // handshake never blocks the microphone from starting.
-                logD("assistant: transcript ready, resolving chat (ws=${mutableState.value.wsConnected})")
                 val chatId = ensureChat()
                 if (chatId == null) {
                     update { it.copy(error = "Не удалось создать чат для отправки", assistantLaunching = false) }
                     return@launch
                 }
-                sendInternal(chatId, text)
+                sendInternal(chatId, outgoing)
             } catch (error: CancellationException) {
                 recorder.reset()
                 throw error
@@ -705,6 +836,12 @@ class JvmAppController(
         this.settings.update { settings }
         update { it.copy(settings = settings) }
         if (previous.baseUrl != settings.baseUrl || previous.secret != settings.secret) {
+            if (previous.baseUrl != settings.baseUrl) {
+                this.settings.setCachedSessions(emptyList())
+                this.settings.setCachedPinnedKeys(emptySet())
+                this.settings.setCachedArchivedKeys(emptySet())
+                update { it.copy(sessions = emptyList(), pinnedKeys = emptySet(), archivedKeys = emptySet()) }
+            }
             if (mutableState.value.connection.phase != ConnectionPhase.IDLE) disconnect()
         }
     }
@@ -1252,9 +1389,13 @@ class JvmAppController(
                     activeTurnId = null,
                     stopping = false,
                     error = null,
+                    goal = GoalStatePayload(),
+                    goalStatus = null,
+                    goalStartedAt = null,
                     sessions = listOf(row) + it.sessions.filterNot { session -> session.key == key },
                 )
             }
+            cacheSessions(mutableState.value.sessions)
             settings.setLastSession(key)
             tts.setActiveChat(chatId)
             tts.stop()
@@ -1361,6 +1502,9 @@ class JvmAppController(
                 activeTurnId = null,
                 stopping = false,
                 contextUsage = null,
+                goal = GoalStatePayload(),
+                goalStatus = null,
+                goalStartedAt = null,
             )
         }
     }
@@ -1423,7 +1567,18 @@ class JvmAppController(
                 scope.launch { delay(300); refreshSessions(silent = true) }
             }
             is InboundEvent.GoalStatus -> {
+                if (matches(event.value.chatId)) {
+                    update {
+                        it.copy(
+                            goalStatus = event.value.status.takeIf { status -> status.isNotBlank() },
+                            goalStartedAt = event.value.startedAt,
+                        )
+                    }
+                }
                 scope.launch { delay(300); refreshSessions(silent = true) }
+            }
+            is InboundEvent.GoalState -> if (matches(event.value.chatId)) {
+                update { it.copy(goal = event.value.goalState) }
             }
             is InboundEvent.PicoMessageCreate,
             is InboundEvent.PicoMessageUpdate,
@@ -1633,6 +1788,7 @@ class JvmAppController(
         if (turnId != null) completedTurns.add(turnId)
         val finalText = message?.content?.takeIf { it.isNotBlank() }
             ?: canonical.firstOrNull { it.turnId == turnId && it.role == "assistant" }?.content.orEmpty()
+        event.goalState?.let { goal -> update { it.copy(goal = goal) } }
         val chatId = currentChatId
         if (chatId != null && finalText.isNotBlank() && mutableState.value.tts.enabled) {
             tts.onAssistantFinal(chatId, finalText, turnId)
@@ -1763,6 +1919,12 @@ private fun JsonObject.stringSet(key: String): Set<String> =
     (this[key] as? JsonArray)
         ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
         ?.toSet()
+        .orEmpty()
+
+private fun JsonObject.stringList(key: String): List<String> =
+    (this[key] as? JsonArray)
+        ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+        ?.filter { it.isNotBlank() }
         .orEmpty()
 
 private fun defaultHttpClient(): OkHttpClient = OkHttpClient.Builder()

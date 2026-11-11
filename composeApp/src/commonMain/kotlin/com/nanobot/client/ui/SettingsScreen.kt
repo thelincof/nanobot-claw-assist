@@ -384,6 +384,19 @@ private fun AppSettingsTab(controller: AppController, state: AppState) {
                 }
             }
             Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = draft.goalVoicePhrase,
+                onValueChange = { draft = draft.copy(goalVoicePhrase = it) },
+                label = { Text(stringResource(Res.string.goal_voice_phrase)) },
+                supportingText = {
+                    if (draft.goalVoicePhrase.isNotBlank()) {
+                        Text(stringResource(Res.string.goal_voice_hint, draft.goalVoicePhrase.trim()))
+                    }
+                },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(12.dp))
             Text(stringResource(Res.string.assistant_chat_mode), style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

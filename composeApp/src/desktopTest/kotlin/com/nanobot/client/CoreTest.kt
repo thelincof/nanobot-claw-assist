@@ -10,6 +10,7 @@ import com.nanobot.client.core.model.BootstrapResponse
 import com.nanobot.client.core.model.InboundEvent
 import com.nanobot.client.core.model.UiMessage
 import com.nanobot.client.core.model.parseInboundEvent
+import com.nanobot.client.goal.goalCommandFromVoice
 import com.nanobot.client.hotword.buildVoskGrammar
 import com.nanobot.client.hotword.normalizeHotwordPhrase
 import com.nanobot.client.hotword.transcriptMatchesPhrase
@@ -130,6 +131,24 @@ class CoreTest {
 
         assertEquals(1, projected.size)
         assertEquals("thinking", projected.single().reasoning)
+    }
+
+    @Test
+    fun convertsVoiceGoalIntent() {
+        assertEquals(
+            "/goal подготовить отчёт",
+            goalCommandFromVoice("Задача: подготовить отчёт", "задача", "клод"),
+        )
+        assertEquals(
+            "/goal проверить сервер",
+            goalCommandFromVoice("Клод, задача проверить сервер", "задача", "клод"),
+        )
+        assertEquals(
+            "/goal проверить сервер",
+            goalCommandFromVoice("цель проверить сервер", "цель", "клод"),
+        )
+        assertEquals(null, goalCommandFromVoice("у меня задача посложнее", "задача", "клод"))
+        assertEquals(null, goalCommandFromVoice("задача", "задача", "клод"))
     }
 
     @Test

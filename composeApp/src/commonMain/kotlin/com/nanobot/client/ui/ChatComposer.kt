@@ -115,6 +115,7 @@ fun ChatComposer(
     // The stop button reflects an actual in-flight turn, not a stale isStreaming flag.
     val turnActive = state.sending || state.awaitingFirstToken ||
         state.activeTurnId != null || state.stopping
+    val goalActive = state.goal.active || state.goal.status == "blocked"
     val canSend = connected && (text.isNotBlank() || attachments.isNotEmpty()) && !turnActive
 
     fun submit() {
@@ -169,9 +170,16 @@ fun ChatComposer(
                 } else {
                     Surface(
                         shape = RoundedCornerShape(22.dp),
-                        color = LocalWebUiColors.current.popover,
-                        border = BorderStroke(1.dp, scheme.outline),
-                        shadowElevation = 3.dp,
+                        color = if (goalActive) {
+                            Color(0xFF3B82F6).copy(alpha = 0.08f)
+                        } else {
+                            LocalWebUiColors.current.popover
+                        },
+                        border = BorderStroke(
+                            if (goalActive) 1.5.dp else 1.dp,
+                            if (goalActive) Color(0xFF3B82F6) else scheme.outline,
+                        ),
+                        shadowElevation = if (goalActive) 5.dp else 3.dp,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Row(
