@@ -269,8 +269,28 @@ class JvmAppController(
                 cacheSessions(merged)
                 val selected = mutableState.value.selectedSession
                 if (selected != null) {
-                    val fresh = merged.firstOrNull { it.key == selected.key }
-                    if (fresh != null) update { it.copy(selectedSession = fresh) }
+                    val selectedChatId = selected.chatId?.takeIf { it.isNotBlank() }
+                        ?: selected.key.substringAfter("websocket:", selected.key).takeIf { it.isNotBlank() }
+                    val fresh = merged.firstOrNull {
+                        it.key == selected.key ||
+                            (selectedChatId != null && it.chatId == selectedChatId)
+                    }
+                    if (fresh != null) {
+                        update { it.copy(selectedSession = fresh) }
+                        val freshChatId = fresh.chatId?.takeIf { it.isNotBlank() }
+                            ?: fresh.key.substringAfter("websocket:", fresh.key).takeIf { it.isNotBlank() }
+                        // Cached rows can be stale. If the refreshed session points
+                        // at another chat id, reopen it instead of keeping an empty
+                        // thread loaded with the old key.
+                        if (freshChatId != null && freshChatId != currentChatId) {
+                            openSession(fresh)
+                        } else if (freshChatId != null &&
+                            mutableState.value.messages.isEmpty() &&
+                            !mutableState.value.messagesLoading
+                        ) {
+                            loadThread(freshChatId, fresh.key)
+                        }
+                    }
                 }
             } catch (error: CancellationException) {
                 throw error
@@ -576,18 +596,20 @@ class JvmAppController(
             return
         }
         currentChatId = chatId
-        canonical = emptyList()
+        val cachedThread = settings.cachedThread(session.key)
+        canonical = cachedThread?.messages.orEmpty()
         transient.clear()
         optimistic.clear()
         completedTurns.clear()
+        cachedThread?.completedTurnIds?.let { completedTurns.addAll(it) }
         loadGeneration++
         noteTurnActivity()
         update {
             it.copy(
                 selectedSession = session,
                 chatId = chatId,
-                messages = emptyList(),
-                messagesLoading = true,
+                messages = canonical,
+                messagesLoading = cachedThread == null,
                 messagesError = null,
                 sending = false,
                 awaitingFirstToken = false,
@@ -645,6 +667,7 @@ class JvmAppController(
         }
         update { it.copy(sessions = it.sessions.filterNot { row -> row.key == session.key }) }
         cacheSessions(mutableState.value.sessions)
+        settings.removeCachedThread(session.key)
         if (mutableState.value.selectedSession?.key == session.key) {
             clearChatState()
             settings.setLastSession(null)
@@ -1511,12 +1534,20 @@ class JvmAppController(
 
     private suspend fun loadThread(chatId: String, sessionKey: String) {
         val generation = ++loadGeneration
-        update { it.copy(messagesLoading = true, messagesError = null) }
+        update { it.copy(messagesLoading = it.messages.isEmpty(), messagesError = null) }
         try {
+            logD("thread: load key=$sessionKey chat=$chatId")
             val payload = gateway.api().thread(sessionKey)
             if (currentChatId != chatId || generation != loadGeneration) return
+            logD("thread: loaded key=$sessionKey messages=${payload.messages.size} active=${payload.activeTurnId}")
+            if (payload.messages.isEmpty() && canonical.isNotEmpty()) {
+                // A transient/stale empty response must not erase a cached thread.
+                update { it.copy(messagesLoading = false) }
+                return
+            }
             canonical = payload.messages
             payload.completedTurnIds?.let { completedTurns.addAll(it) }
+            settings.setCachedThread(sessionKey, payload)
             val canonicalTurns = canonical.mapNotNull { it.turnId }.toSet()
             transient.keys
                 .filter { it in completedTurns && it in canonicalTurns }
@@ -1554,8 +1585,14 @@ class JvmAppController(
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
+            logD("thread: failed key=$sessionKey error=${error.javaClass.simpleName}: ${error.message}")
             if (currentChatId == chatId && generation == loadGeneration) {
-                update { it.copy(messagesLoading = false, messagesError = error.message ?: "Не удалось загрузить историю") }
+                update {
+                    it.copy(
+                        messagesLoading = false,
+                        messagesError = error.message ?: "Не удалось загрузить историю",
+                    )
+                }
             }
         }
     }

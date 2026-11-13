@@ -164,7 +164,7 @@ data class UiFileDiff(
 @Serializable
 data class UiFileEdit(
     val version: Int? = null,
-    @SerialName("call_id") val callId: String,
+    @SerialName("call_id") val callId: String = "",
     val tool: String = "",
     val path: String = "",
     @SerialName("absolute_path") val absolutePath: String? = null,
@@ -184,7 +184,7 @@ data class UiFileEdit(
 data class UiImage(val url: String? = null, val name: String? = null)
 
 @Serializable
-data class UiMediaAttachment(val kind: String, val url: String? = null, val name: String? = null)
+data class UiMediaAttachment(val kind: String = "", val url: String? = null, val name: String? = null)
 
 @Serializable
 data class AgentUiBlob(val kind: String, val data: JsonElement? = null)

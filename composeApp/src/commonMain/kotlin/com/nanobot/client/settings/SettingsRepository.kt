@@ -1,6 +1,7 @@
 package com.nanobot.client.settings
 
 import com.nanobot.client.core.model.SessionRow
+import com.nanobot.client.core.model.WebUiThreadPayload
 import com.russhwolf.settings.Settings
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -134,6 +135,30 @@ class SettingsRepository(private val settings: Settings) {
     fun cachedArchivedKeys(): Set<String> = cachedStringSet(KEY_ARCHIVED_CACHE)
     fun setCachedArchivedKeys(keys: Set<String>) = settings.putString(KEY_ARCHIVED_CACHE, keys.joinToString("\u0001"))
 
+    fun cachedThread(sessionKey: String): WebUiThreadPayload? = runCatching {
+        val raw = settings.getString(threadCacheKey(sessionKey), "")
+        if (raw.isBlank()) return@runCatching null
+        sessionJson.decodeFromString(WebUiThreadPayload.serializer(), raw)
+    }.getOrNull()
+
+    fun setCachedThread(sessionKey: String, payload: WebUiThreadPayload) {
+        runCatching {
+            settings.putString(
+                threadCacheKey(sessionKey),
+                sessionJson.encodeToString(
+                    WebUiThreadPayload.serializer(),
+                    payload.copy(messages = payload.messages.takeLast(160)),
+                ),
+            )
+        }
+    }
+
+    fun removeCachedThread(sessionKey: String) {
+        settings.remove(threadCacheKey(sessionKey))
+    }
+
+    private fun threadCacheKey(sessionKey: String) = "$KEY_THREAD_CACHE_PREFIX$sessionKey"
+
     private fun cachedStringSet(key: String): Set<String> =
         settings.getString(key, "").split('\u0001').filter { it.isNotBlank() }.toSet()
 
@@ -167,6 +192,7 @@ class SettingsRepository(private val settings: Settings) {
         const val KEY_SESSIONS_CACHE = "sessions.cache"
         const val KEY_PINNED_CACHE = "sessions.pinned"
         const val KEY_ARCHIVED_CACHE = "sessions.archived"
+        const val KEY_THREAD_CACHE_PREFIX = "sessions.thread."
     }
 }
 
