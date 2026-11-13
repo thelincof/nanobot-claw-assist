@@ -253,6 +253,9 @@ data class WebUiThreadPayload(
     @SerialName("sessionKey") val sessionKey: String? = null,
     @SerialName("savedAt") val savedAt: String? = null,
     val messages: List<UiMessage> = emptyList(),
+    /** Nanobot 0.4+ canonical event projection (schemaVersion 3). */
+    val events: List<JsonObject> = emptyList(),
+    val projection: String? = null,
     @SerialName("completed_turn_ids") val completedTurnIds: List<String>? = null,
     @SerialName("active_turn_id") val activeTurnId: String? = null,
     val page: ThreadPage? = null,

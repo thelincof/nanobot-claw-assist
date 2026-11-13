@@ -26,6 +26,7 @@ import com.nanobot.client.core.model.ReasoningDeltaEvent
 import com.nanobot.client.core.model.ReasoningEndEvent
 import com.nanobot.client.core.model.SessionRow
 import com.nanobot.client.core.model.StreamEndEvent
+import com.nanobot.client.core.model.ThreadEventMapper
 import com.nanobot.client.core.model.ToolProgressEvent
 import com.nanobot.client.core.model.TurnEndEvent
 import com.nanobot.client.core.model.UiFileEdit
@@ -1539,15 +1540,28 @@ class JvmAppController(
             logD("thread: load key=$sessionKey chat=$chatId")
             val payload = gateway.api().thread(sessionKey)
             if (currentChatId != chatId || generation != loadGeneration) return
-            logD("thread: loaded key=$sessionKey messages=${payload.messages.size} active=${payload.activeTurnId}")
-            if (payload.messages.isEmpty() && canonical.isNotEmpty()) {
+            val projection = if (payload.messages.isEmpty() && payload.events.isNotEmpty()) {
+                ThreadEventMapper.project(payload.events)
+            } else {
+                null
+            }
+            val loadedMessages = projection?.messages ?: payload.messages
+            logD(
+                "thread: loaded key=$sessionKey messages=${loadedMessages.size} " +
+                    "events=${payload.events.size} active=${payload.activeTurnId}",
+            )
+            if (loadedMessages.isEmpty() && canonical.isNotEmpty()) {
                 // A transient/stale empty response must not erase a cached thread.
                 update { it.copy(messagesLoading = false) }
                 return
             }
-            canonical = payload.messages
+            canonical = loadedMessages
             payload.completedTurnIds?.let { completedTurns.addAll(it) }
-            settings.setCachedThread(sessionKey, payload)
+            projection?.goalState?.let { goal -> update { it.copy(goal = goal) } }
+            settings.setCachedThread(
+                sessionKey,
+                payload.copy(messages = loadedMessages, events = emptyList()),
+            )
             val canonicalTurns = canonical.mapNotNull { it.turnId }.toSet()
             transient.keys
                 .filter { it in completedTurns && it in canonicalTurns }
