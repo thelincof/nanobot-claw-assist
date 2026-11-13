@@ -2,6 +2,7 @@ package com.nanobot.client.app
 
 import com.nanobot.client.audio.VoiceUiState
 import com.nanobot.client.core.model.AutomationJob
+import com.nanobot.client.core.model.CommandItem
 import com.nanobot.client.core.model.GoalStatePayload
 import com.nanobot.client.core.model.McpPresetItem
 import com.nanobot.client.core.model.LocalAttachment
@@ -28,6 +29,25 @@ data class ChatGroup(
     val sessionKeys: List<String>,
 )
 
+/** Fallback palette shown before /api/commands is loaded or on an old gateway. */
+val defaultSlashCommands: List<CommandItem> = listOf(
+    CommandItem("/new", "New chat", "Reset this chat and start a fresh conversation.", "square-pen", lifecycle = "finalize_active_turn"),
+    CommandItem("/compact", "Compact context", "Compact this chat's context and continue the conversation.", "archive"),
+    CommandItem("/stop", "Stop current task", "Cancel the active agent turn for this chat.", "square", lifecycle = "stop_active_turn"),
+    CommandItem("/status", "Show status", "Display runtime, provider, and channel status.", "activity"),
+    CommandItem("/model", "Switch model preset", "Show or switch the active model preset.", "brain", "[preset]", acceptsArgs = true),
+    CommandItem("/goal", "Long-running goal", "Treat the request as a sustained multi-step goal.", "target", "<goal>", acceptsArgs = true),
+    CommandItem("/history", "Show conversation history", "Print the last N persisted conversation messages.", "history", "[n]", acceptsArgs = true),
+    CommandItem("/help", "Show help", "List available slash commands.", "circle-help"),
+    CommandItem("/skill", "List skills", "List all enabled skills available to the agent.", "wrench"),
+    CommandItem("/trigger", "Create named local trigger", "Create a named CLI trigger bound to this chat session.", "zap", "<name>", acceptsArgs = true),
+    CommandItem("/pairing", "Manage pairing", "List, approve, deny or revoke pairing requests.", "shield", "[list|approve <code>|deny <code>|revoke <user_id>]", acceptsArgs = true),
+    CommandItem("/dream", "Run Dream", "Manually trigger memory consolidation.", "sparkles"),
+    CommandItem("/dream-log", "Show Dream log", "Show what the last Dream consolidation changed.", "book-open", acceptsArgs = true),
+    CommandItem("/dream-restore", "Restore memory", "Revert memory to a previous Dream snapshot.", "undo-2", acceptsArgs = true),
+    CommandItem("/dream-prompt", "Dream memory", "Tell Dream how to organize this workspace's memory.", "file-text", "[init]", acceptsArgs = true),
+)
+
 data class AppState(
     val connection: ConnectionUi = ConnectionUi(),
     val settings: AppSettings = AppSettings(),
@@ -41,6 +61,7 @@ data class AppState(
     val sessionsLoading: Boolean = false,
     val sessionsError: String? = null,
     val chatGroups: List<ChatGroup> = emptyList(),
+    val commands: List<CommandItem> = defaultSlashCommands,
     val search: String = "",
     val selectedSession: SessionRow? = null,
     val chatId: String? = null,

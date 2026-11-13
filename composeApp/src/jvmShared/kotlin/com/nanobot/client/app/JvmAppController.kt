@@ -132,6 +132,7 @@ class JvmAppController(
                 }
                 if (mapped.phase == ConnectionPhase.CONNECTED && !wasConnected) {
                     refreshSessions()
+                    loadCommands()
                     loadWorkspacesInfo()
                     refreshGatewaySettings()
                     loadGatewayConfig()
@@ -563,6 +564,15 @@ class JvmAppController(
             if (!explicit && panes.size <= 1) return@mapNotNull null
             val title = (tab["title"] as? JsonPrimitive)?.contentOrNull.orEmpty().ifBlank { "Группа" }
             ChatGroup(key = key, title = title, sessionKeys = panes)
+        }
+    }
+
+    private fun loadCommands() {
+        scope.launch {
+            val commands = runCatching { gateway.api().commands().commands }.getOrNull()
+            if (!commands.isNullOrEmpty()) {
+                update { it.copy(commands = commands) }
+            }
         }
     }
 

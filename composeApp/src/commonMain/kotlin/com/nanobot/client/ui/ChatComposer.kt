@@ -7,6 +7,8 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,11 +16,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -45,12 +50,15 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -58,6 +66,8 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -65,6 +75,7 @@ import com.nanobot.client.app.AppController
 import com.nanobot.client.app.AppState
 import com.nanobot.client.app.ConnectionPhase
 import com.nanobot.client.audio.VoicePhase
+import com.nanobot.client.core.model.CommandItem
 import com.nanobot.client.core.model.LocalAttachment
 import com.nanobot.client.platform.MicPermissionState
 import com.nanobot.client.platform.rememberAttachmentPicker
@@ -95,6 +106,9 @@ fun ChatComposer(
     var attachments by remember(state.chatId) { mutableStateOf<List<LocalAttachment>>(emptyList()) }
     var attachmentError by remember { mutableStateOf<String?>(null) }
     var attachMenuOpen by remember { mutableStateOf(false) }
+    var commandMenuDismissed by remember(state.chatId) { mutableStateOf(false) }
+    var selectedCommandIndex by remember { mutableStateOf(0) }
+    val focusRequester = remember { FocusRequester() }
     val picker = rememberAttachmentPicker { picked ->
         val merged = (attachments + picked).take(MAX_ATTACHMENTS)
         if (attachments.size + picked.size > MAX_ATTACHMENTS) {
@@ -117,6 +131,27 @@ fun ChatComposer(
         state.activeTurnId != null || state.stopping
     val goalActive = state.goal.active || state.goal.status == "blocked"
     val canSend = connected && (text.isNotBlank() || attachments.isNotEmpty()) && !turnActive
+    val slashQuery = text
+        .takeIf { it.startsWith("/") && !it.contains(' ') && !it.contains('\n') }
+        ?.drop(1)
+    val slashMatches = if (slashQuery == null) {
+        emptyList()
+    } else {
+        state.commands
+            .filter { it.command.removePrefix("/").startsWith(slashQuery, ignoreCase = true) }
+            .take(12)
+    }
+    val slashOpen = connected && !expanded && !commandMenuDismissed &&
+        slashQuery != null && slashMatches.isNotEmpty()
+    LaunchedEffect(slashQuery, slashMatches.size) {
+        selectedCommandIndex = 0
+    }
+
+    fun chooseCommand(command: CommandItem) {
+        text = command.command + if (command.acceptsArgs) " " else ""
+        commandMenuDismissed = true
+        runCatching { focusRequester.requestFocus() }
+    }
 
     fun submit() {
         if (!canSend) return
@@ -134,6 +169,15 @@ fun ChatComposer(
         Column(
             Modifier.fillMaxWidth().widthIn(max = 720.dp).padding(horizontal = 16.dp),
         ) {
+            if (slashOpen) {
+                SlashCommandMenu(
+                    commands = slashMatches,
+                    selectedIndex = selectedCommandIndex.coerceIn(0, slashMatches.lastIndex),
+                    onSelect = ::chooseCommand,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.size(6.dp))
+            }
             if (!expanded && attachments.isNotEmpty()) {
                 AttachmentChips(attachments = attachments, onRemove = { index ->
                     attachments = attachments.toMutableList().also { it.removeAt(index) }
@@ -228,7 +272,10 @@ fun ChatComposer(
                             }
                             OutlinedTextField(
                                 value = text,
-                                onValueChange = { text = it },
+                                onValueChange = {
+                                    text = it
+                                    commandMenuDismissed = false
+                                },
                                 placeholder = {
                                     Text(
                                         stringResource(Res.string.message_hint),
@@ -247,19 +294,55 @@ fun ChatComposer(
                                     disabledContainerColor = Color.Transparent,
                                 ),
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                                keyboardActions = KeyboardActions(onSend = { submit() }),
-                                modifier = Modifier.weight(1f).onPreviewKeyEvent { event ->
-                                    if (event.type == KeyEventType.KeyDown && event.key == Key.Enter && !event.isShiftPressed) {
-                                        if (canSend) {
-                                            submit()
-                                            true
+                                keyboardActions = KeyboardActions(onSend = {
+                                    if (slashOpen && slashMatches.isNotEmpty()) {
+                                        chooseCommand(slashMatches[selectedCommandIndex.coerceIn(0, slashMatches.lastIndex)])
+                                    } else {
+                                        submit()
+                                    }
+                                }),
+                                modifier = Modifier.weight(1f)
+                                    .focusRequester(focusRequester)
+                                    .onPreviewKeyEvent { event ->
+                                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                        if (slashOpen && slashMatches.isNotEmpty()) {
+                                            when (event.key) {
+                                                Key.DirectionDown -> {
+                                                    selectedCommandIndex = (selectedCommandIndex + 1) % slashMatches.size
+                                                    true
+                                                }
+                                                Key.DirectionUp -> {
+                                                    selectedCommandIndex =
+                                                        (selectedCommandIndex - 1 + slashMatches.size) % slashMatches.size
+                                                    true
+                                                }
+                                                Key.Enter -> {
+                                                    if (!event.isShiftPressed) {
+                                                        chooseCommand(
+                                                            slashMatches[selectedCommandIndex.coerceIn(0, slashMatches.lastIndex)],
+                                                        )
+                                                        true
+                                                    } else {
+                                                        false
+                                                    }
+                                                }
+                                                Key.Escape -> {
+                                                    commandMenuDismissed = true
+                                                    true
+                                                }
+                                                else -> false
+                                            }
+                                        } else if (event.key == Key.Enter && !event.isShiftPressed) {
+                                            if (canSend) {
+                                                submit()
+                                                true
+                                            } else {
+                                                false
+                                            }
                                         } else {
                                             false
                                         }
-                                    } else {
-                                        false
-                                    }
-                                },
+                                    },
                             )
                             // Mic / record button
                             Surface(
@@ -332,6 +415,72 @@ fun ChatComposer(
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SlashCommandMenu(
+    commands: List<CommandItem>,
+    selectedIndex: Int,
+    onSelect: (CommandItem) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = LocalWebUiColors.current.popover,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
+        shadowElevation = 4.dp,
+        modifier = modifier,
+    ) {
+        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 280.dp)) {
+            itemsIndexed(commands, key = { _, command -> command.command }) { index, command ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelect(command) }
+                        .background(
+                            if (index == selectedIndex) {
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                            } else {
+                                Color.Transparent
+                            },
+                        )
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        command.command,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            command.title,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Text(
+                            command.description,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = LocalWebUiColors.current.sidebarMuted,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    command.argHint?.takeIf { it.isNotBlank() }?.let { hint ->
+                        Text(
+                            hint,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = LocalWebUiColors.current.sidebarMuted,
+                            maxLines = 1,
+                        )
                     }
                 }
             }

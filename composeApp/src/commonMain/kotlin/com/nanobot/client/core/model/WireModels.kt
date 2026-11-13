@@ -58,6 +58,20 @@ data class BootstrapResponse(
 data class SessionsPayload(val sessions: List<SessionRow> = emptyList())
 
 @Serializable
+data class CommandItem(
+    val command: String = "",
+    val title: String = "",
+    val description: String = "",
+    val icon: String? = null,
+    @SerialName("arg_hint") val argHint: String? = null,
+    val lifecycle: String? = null,
+    @SerialName("accepts_args") val acceptsArgs: Boolean = false,
+)
+
+@Serializable
+data class CommandsPayload(val commands: List<CommandItem> = emptyList())
+
+@Serializable
 data class AgentSettingsPayload(
     val model: String? = null,
     val provider: String? = null,

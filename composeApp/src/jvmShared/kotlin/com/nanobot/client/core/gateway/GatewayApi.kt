@@ -21,6 +21,10 @@ class GatewayApi(
     suspend fun sessions(): com.nanobot.client.core.model.SessionsPayload =
         request("/api/sessions", com.nanobot.client.core.model.SessionsPayload.serializer())
 
+    /** Slash-command palette from the gateway. */
+    suspend fun commands(): com.nanobot.client.core.model.CommandsPayload =
+        request("/api/commands", com.nanobot.client.core.model.CommandsPayload.serializer())
+
     /** Raw GET /api/workspaces payload: default_scope + controls (can_pick_folder etc.). */
     suspend fun workspacesRaw(): kotlinx.serialization.json.JsonObject =
         requestJson("/api/workspaces")
