@@ -1608,6 +1608,25 @@ class JvmAppController(
             }
         } catch (error: CancellationException) {
             throw error
+        } catch (error: GatewayException) {
+            if (error.status == 404) {
+                // A new chat has no persisted webui transcript until its first
+                // message. That is an empty thread, not a user-visible error.
+                logD("thread: empty/new session key=$sessionKey")
+                if (currentChatId == chatId && generation == loadGeneration) {
+                    update { it.copy(messagesLoading = false, messagesError = null) }
+                }
+                return
+            }
+            logD("thread: failed key=$sessionKey error=${error.javaClass.simpleName}: ${error.message}")
+            if (currentChatId == chatId && generation == loadGeneration) {
+                update {
+                    it.copy(
+                        messagesLoading = false,
+                        messagesError = error.message ?: "Не удалось загрузить историю",
+                    )
+                }
+            }
         } catch (error: Exception) {
             logD("thread: failed key=$sessionKey error=${error.javaClass.simpleName}: ${error.message}")
             if (currentChatId == chatId && generation == loadGeneration) {
