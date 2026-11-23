@@ -165,6 +165,9 @@
     <string name="restart_gateway_confirm">Вы уверены, что хотите перезапустить шлюз?</string>
     <string name="select_model">Выбрать модель</string>
     <string name="default_model">Модель по умолчанию</string>
+    <string name="chat_model">Модель чата</string>
+    <string name="model_default_option">По умолчанию</string>
+    <string name="model_fallback">Фактически: %s</string>
     <string name="models">Модели</string>
     <string name="model_status_available">Доступна</string>
     <string name="model_status_unconfigured">Не настроена</string>

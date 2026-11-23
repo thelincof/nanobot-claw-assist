@@ -7,15 +7,20 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mikepenz.markdown.compose.components.markdownComponents
+import com.mikepenz.markdown.compose.elements.MarkdownCodeBlock
+import com.mikepenz.markdown.compose.elements.MarkdownCodeFence
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownTypography
+import com.mikepenz.markdown.model.markdownPadding
 
 /** Preferred chat message font size (sp), configured in settings. */
 val LocalChatFontSize = staticCompositionLocalOf { 15f }
 
 fun withChatFont(base: TextStyle, size: Float): TextStyle =
-    base.copy(fontSize = size.sp, lineHeight = (size * 1.45f).sp)
+    base.copy(fontSize = size.sp, lineHeight = (size * 1.55f).sp)
 
 @Composable
 fun MarkdownText(content: String, modifier: Modifier = Modifier) {
@@ -44,6 +49,23 @@ fun MarkdownText(content: String, modifier: Modifier = Modifier) {
             list = body,
             inlineCode = body.copy(fontFamily = FontFamily.Monospace),
             code = body.copy(fontFamily = FontFamily.Monospace),
+        ),
+        padding = markdownPadding(
+            block = 6.dp,
+            listItemBottom = 4.dp,
+        ),
+        components = markdownComponents(
+            codeFence = { model ->
+                MarkdownCodeFence(model.content, model.node) { code, language ->
+                    RichCodeBlock(code, language, model.typography.code)
+                }
+            },
+            codeBlock = { model ->
+                MarkdownCodeBlock(model.content, model.node) { code, language ->
+                    RichCodeBlock(code, language, model.typography.code)
+                }
+            },
+            table = { model -> SimpleMarkdownTable(model) },
         ),
     )
 }

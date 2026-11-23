@@ -87,6 +87,8 @@ data class AppState(
     val modelPresets: List<ModelPresetItem> = emptyList(),
     val activeModelPreset: String? = null,
     val agentModel: String? = null,
+    /** Actual model used by the last turn when Nanobot fell back from the selected preset. */
+    val chatFallbackModel: String? = null,
     val providers: List<ProviderItem> = emptyList(),
     val modelsLoading: Boolean = false,
     val contextUsage: com.nanobot.client.core.model.ContextUsagePayload? = null,
@@ -157,6 +159,7 @@ interface AppController {
     fun testTts(text: String)
     fun refreshGatewaySettings()
     fun selectModelPreset(presetName: String)
+    fun selectChatModelPreset(presetName: String)
     fun loadGatewayConfig()
     fun saveGatewayConfig(rawJson: String, onSuccess: () -> Unit = {})
     fun saveRuntimeConfig(values: JsonObject, onSuccess: () -> Unit = {})

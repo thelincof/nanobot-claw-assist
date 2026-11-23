@@ -150,6 +150,7 @@ data class RuntimeModelUpdatedEvent(
 data class TurnModelUpdatedEvent(
     @SerialName("chat_id") val chatId: String,
     @SerialName("model_name") val modelName: String,
+    val fallback: Boolean = false,
 )
 
 @Serializable

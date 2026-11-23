@@ -167,7 +167,10 @@ fun ChatComposer(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Column(
-            Modifier.fillMaxWidth().widthIn(max = 720.dp).padding(horizontal = 16.dp),
+            Modifier
+                .fillMaxWidth()
+                .widthIn(max = 720.dp)
+                .padding(start = 16.dp, end = 16.dp, bottom = 10.dp),
         ) {
             if (slashOpen) {
                 SlashCommandMenu(

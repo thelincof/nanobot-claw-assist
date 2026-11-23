@@ -22,7 +22,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Menu
+import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material.icons.rounded.VolumeOff
@@ -30,6 +33,8 @@ import androidx.compose.material.icons.rounded.StopCircle
 import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -64,10 +69,14 @@ import com.nanobot.client.app.ConnectionPhase
 import com.nanobot.client.core.model.UiMessage
 import com.nanobot.client.platform.MicPermissionState
 import com.nanobot.client.resources.Res
+import com.nanobot.client.resources.chat_model
 import com.nanobot.client.resources.chat_untitled
 import com.nanobot.client.resources.choose_chat
+import com.nanobot.client.resources.default_model
 import com.nanobot.client.resources.empty_state_title
 import com.nanobot.client.resources.choose_chat_hint
+import com.nanobot.client.resources.model_default_option
+import com.nanobot.client.resources.model_fallback
 import com.nanobot.client.resources.connection_failed
 import com.nanobot.client.resources.connection_lost
 import com.nanobot.client.resources.reconnecting
@@ -174,6 +183,23 @@ private fun ChatTopBar(
     onOpenSettings: () -> Unit,
 ) {
     val ui = LocalWebUiColors.current
+    var modelMenuOpen by remember { mutableStateOf(false) }
+    val defaultModel = state.activeModelPreset
+    val chatModel = state.selectedSession?.modelPreset
+        ?.takeIf { it.isNotBlank() && it != defaultModel }
+    val effectiveModel = chatModel ?: defaultModel ?: "default"
+    val effectivePreset = state.modelPresets.firstOrNull {
+        it.name == effectiveModel || it.model == effectiveModel
+    }
+    val effectiveLabel = effectivePreset?.label
+        ?.takeIf { it.isNotBlank() }
+        ?: effectivePreset?.name?.takeIf { it.isNotBlank() }
+        ?: effectiveModel
+    val modelHint = state.chatFallbackModel?.let {
+        stringResource(Res.string.model_fallback, it)
+    } ?: stringResource(
+        if (chatModel != null) Res.string.chat_model else Res.string.default_model,
+    )
     Surface(color = MaterialTheme.colorScheme.background) {
         Row(
             modifier = Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 8.dp),
@@ -208,6 +234,97 @@ private fun ChatTopBar(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                }
+            }
+            if (state.selectedSession != null) {
+                Box {
+                    Surface(
+                        onClick = { modelMenuOpen = true },
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                Icons.Rounded.Psychology,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                            Spacer(Modifier.width(5.dp))
+                            Column(Modifier.widthIn(max = if (compact) 86.dp else 150.dp)) {
+                                Text(
+                                    effectiveLabel,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                if (!compact) {
+                                    Text(
+                                        modelHint,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (state.chatFallbackModel != null) {
+                                            MaterialTheme.colorScheme.error
+                                        } else {
+                                            ui.sidebarMuted
+                                        },
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                            Icon(
+                                Icons.Rounded.ArrowDropDown,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = ui.sidebarMuted,
+                            )
+                        }
+                    }
+                    DropdownMenu(
+                        expanded = modelMenuOpen,
+                        onDismissRequest = { modelMenuOpen = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(Res.string.model_default_option)) },
+                            leadingIcon = if (chatModel == null) {
+                                { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                            } else null,
+                            onClick = {
+                                modelMenuOpen = false
+                                controller.selectChatModelPreset("default")
+                            },
+                        )
+                        state.modelPresets.forEach { preset ->
+                            val selected = !chatModel.isNullOrBlank() &&
+                                (preset.name == chatModel || preset.model == chatModel)
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(preset.label.ifBlank { preset.name })
+                                        Text(
+                                            listOfNotNull(
+                                                preset.provider.ifBlank { null },
+                                                preset.model.ifBlank { null },
+                                            ).joinToString(" · "),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                },
+                                leadingIcon = if (selected) {
+                                    { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                } else null,
+                                onClick = {
+                                    modelMenuOpen = false
+                                    controller.selectChatModelPreset(preset.name)
+                                },
+                            )
+                        }
+                    }
                 }
             }
             if (state.tts.speaking || state.tts.loading) {

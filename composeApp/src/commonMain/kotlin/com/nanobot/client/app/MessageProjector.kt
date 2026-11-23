@@ -25,6 +25,9 @@ object MessageProjector {
     private fun hasVisibleContent(message: UiMessage): Boolean =
         message.content.isNotBlank() || hasActivityContent(message)
 
+    private fun isSystemTurn(turnId: String?): Boolean =
+        turnId?.startsWith("webui-system:") == true
+
     private fun keyOf(message: UiMessage, fallback: String = message.id): String =
         message.turnId?.takeIf { it.isNotBlank() }
             ?: message.activitySegmentId?.takeIf { it.isNotBlank() }?.let { "segment:$it" }
@@ -167,6 +170,7 @@ object MessageProjector {
         fun bucketFor(key: String): TurnBucket = buckets.getOrPut(key) { TurnBucket(key) }
 
         canonical.forEach { message ->
+            if (isSystemTurn(message.turnId)) return@forEach
             if (message.role == "system") {
                 systemMessages += message
                 return@forEach
@@ -200,6 +204,7 @@ object MessageProjector {
         }
 
         optimistic.forEach { (turnId, message) ->
+            if (isSystemTurn(message.turnId) || isSystemTurn(turnId)) return@forEach
             val key = message.turnId?.takeIf { it.isNotBlank() } ?: turnId
             val bucket = bucketFor(key)
             bucket.turnId = bucket.turnId ?: message.turnId
@@ -212,6 +217,7 @@ object MessageProjector {
         }
 
         transient.forEach { (turnId, message) ->
+            if (isSystemTurn(message.turnId) || isSystemTurn(turnId)) return@forEach
             val key = message.turnId?.takeIf { it.isNotBlank() } ?: turnId
             val bucket = bucketFor(key)
             bucket.turnId = bucket.turnId ?: message.turnId

@@ -165,6 +165,9 @@
     <string name="restart_gateway_confirm">Are you sure you want to restart the gateway?</string>
     <string name="select_model">Select model</string>
     <string name="default_model">Default model</string>
+    <string name="chat_model">Chat model</string>
+    <string name="model_default_option">Default</string>
+    <string name="model_fallback">Fallback: %s</string>
     <string name="models">Models</string>
     <string name="model_status_available">Available</string>
     <string name="model_status_unconfigured">Not configured</string>

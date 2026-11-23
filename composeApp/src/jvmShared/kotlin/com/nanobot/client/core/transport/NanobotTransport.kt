@@ -242,6 +242,19 @@ class NanobotTransport(
         send(OutboundFrame.Message(chatId = chatId, content = "/stop", turnId = "sys:${UUID.randomUUID()}"))
     }
 
+    /** Fire-and-forget WebUI system command, e.g. `/model <preset>`. */
+    @Synchronized
+    fun sendSystemCommand(chatId: String, command: String) {
+        if (socket == null) return
+        send(
+            OutboundFrame.Message(
+                chatId = chatId,
+                content = command,
+                turnId = "webui-system:${UUID.randomUUID()}",
+            ),
+        )
+    }
+
     /**
      * Send a WebUI mutation (e.g. session.delete) over the authenticated websocket.
      * Mutations are rejected over plain HTTP; this is the only supported channel.

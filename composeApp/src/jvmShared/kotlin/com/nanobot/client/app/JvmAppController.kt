@@ -633,6 +633,7 @@ class JvmAppController(
                 historyBeforeCursor = cachedPage?.beforeCursor,
                 historyLoadingOlder = false,
                 historyLoadFailed = false,
+                chatFallbackModel = null,
                 sending = false,
                 awaitingFirstToken = false,
                 activeTurnId = null,
@@ -939,6 +940,40 @@ class JvmAppController(
             } catch (error: Exception) {
                 update { it.copy(error = error.message ?: "Не удалось сменить модель") }
             }
+        }
+    }
+
+    override fun selectChatModelPreset(presetName: String) {
+        val state = mutableState.value
+        if (state.connection.phase != ConnectionPhase.CONNECTED) return
+        val session = state.selectedSession ?: return
+        val chatId = currentChatId ?: return
+        val name = presetName.trim().ifBlank { "default" }
+        // "default" and an explicit same-as-default choice look identical in the UI.
+        val storedPreset = name.takeUnless { it == "default" || it == state.activeModelPreset }
+
+        applyChatModelPreset(session, storedPreset)
+        update { it.copy(chatFallbackModel = null) }
+        runCatching {
+            gateway.transport().sendSystemCommand(chatId, "/model $name")
+        }.onFailure { error ->
+            update { it.copy(error = friendlyError(error.message)) }
+        }
+        // Session metadata is persisted by the gateway; refresh the sidebar row
+        // shortly after so the chat model survives reconnects and matches webui.
+        scope.launch {
+            delay(1_200)
+            refreshSessions(silent = true)
+        }
+    }
+
+    private fun applyChatModelPreset(session: SessionRow, modelPreset: String?) {
+        val updated = session.copy(modelPreset = modelPreset)
+        update {
+            it.copy(
+                selectedSession = if (it.selectedSession?.key == session.key) updated else it.selectedSession,
+                sessions = it.sessions.map { row -> if (row.key == session.key) updated else row },
+            )
         }
     }
 
@@ -1440,6 +1475,7 @@ class JvmAppController(
                     historyBeforeCursor = null,
                     historyLoadingOlder = false,
                     historyLoadFailed = false,
+                    chatFallbackModel = null,
                     sending = false,
                     awaitingFirstToken = false,
                     activeTurnId = null,
@@ -1565,6 +1601,7 @@ class JvmAppController(
                 historyBeforeCursor = null,
                 historyLoadingOlder = false,
                 historyLoadFailed = false,
+                chatFallbackModel = null,
                 sending = false,
                 awaitingFirstToken = false,
                 activeTurnId = null,
@@ -1820,6 +1857,17 @@ class JvmAppController(
 
     private fun handleEvent(event: InboundEvent) {
         when (event) {
+            is InboundEvent.Attached -> {
+                if (matches(event.value.chatId)) {
+                    val session = mutableState.value.selectedSession
+                    if (session != null) {
+                        val preset = event.value.modelPreset?.takeUnless {
+                            it == mutableState.value.activeModelPreset
+                        }
+                        applyChatModelPreset(session, preset)
+                    }
+                }
+            }
             is InboundEvent.UserMessage -> {
                 // Another chat may have started a turn; keep run_started_at fresh.
                 scope.launch { delay(300); refreshSessions(silent = true) }
@@ -1842,42 +1890,53 @@ class JvmAppController(
             is InboundEvent.PicoMessageUpdate,
             is InboundEvent.PicoTyping,
             -> Unit
-            is InboundEvent.Delta -> if (matches(event.value.chatId)) {
+            is InboundEvent.Delta -> if (matches(event.value.chatId) && !isSystemTurn(event.value.turnId)) {
                 noteTurnActivity()
                 markStreamStarted(event.value.turnId)
                 foldDelta(event.value)
             }
-            is InboundEvent.ReasoningDelta -> if (matches(event.value.chatId)) {
+            is InboundEvent.ReasoningDelta -> if (matches(event.value.chatId) && !isSystemTurn(event.value.turnId)) {
                 noteTurnActivity()
                 markStreamStarted(event.value.turnId)
                 foldReasoning(event.value)
             }
-            is InboundEvent.ReasoningEnd -> if (matches(event.value.chatId)) {
+            is InboundEvent.ReasoningEnd -> if (matches(event.value.chatId) && !isSystemTurn(event.value.turnId)) {
                 noteTurnActivity()
                 foldReasoningEnd(event.value)
             }
-            is InboundEvent.StreamEnd -> if (matches(event.value.chatId)) {
+            is InboundEvent.StreamEnd -> if (matches(event.value.chatId) && !isSystemTurn(event.value.turnId)) {
                 noteTurnActivity()
                 foldStreamEnd(event.value)
             }
-            is InboundEvent.Message -> if (matches(event.value.chatId)) {
+            is InboundEvent.Message -> if (matches(event.value.chatId) && !isSystemTurn(event.value.turnId)) {
                 noteTurnActivity()
                 markStreamStarted(event.value.turnId)
                 foldMessage(event.value)
             }
-            is InboundEvent.FileEdit -> if (matches(event.value.chatId)) {
+            is InboundEvent.FileEdit -> if (matches(event.value.chatId) && !isSystemTurn(event.value.turnId)) {
                 noteTurnActivity()
                 markStreamStarted(event.value.turnId)
                 foldFileEdit(event.value)
             }
-            is InboundEvent.TurnEnd -> if (matches(event.value.chatId)) {
+            is InboundEvent.TurnEnd -> if (matches(event.value.chatId) && !isSystemTurn(event.value.turnId)) {
                 noteTurnActivity()
                 foldTurnEnd(event.value)
             } else {
                 scope.launch { delay(300); refreshSessions(silent = true) }
             }
             is InboundEvent.SessionUpdated -> refreshSessions()
-            is InboundEvent.RuntimeModelUpdated, is InboundEvent.TurnModelUpdated -> refreshGatewaySettings()
+            is InboundEvent.RuntimeModelUpdated -> refreshGatewaySettings()
+            is InboundEvent.TurnModelUpdated -> {
+                if (matches(event.value.chatId)) {
+                    update {
+                        it.copy(
+                            chatFallbackModel = event.value.modelName
+                                .takeIf { event.value.fallback && it.isNotBlank() },
+                        )
+                    }
+                }
+                refreshGatewaySettings()
+            }
             is InboundEvent.Error -> {
                 val chatId = event.value.chatId
                 if (chatId == null || matches(chatId)) {
@@ -1915,6 +1974,9 @@ class JvmAppController(
     private fun matches(chatId: String?): Boolean =
         // If sessionId is null in the WS frame, accept the event for the current chat.
         currentChatId != null && (chatId == null || chatId == currentChatId)
+
+    private fun isSystemTurn(turnId: String?): Boolean =
+        turnId?.startsWith("webui-system:") == true
 
     private fun noteTurnActivity() {
         lastTurnEventAt = System.currentTimeMillis()

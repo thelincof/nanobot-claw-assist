@@ -64,7 +64,7 @@ fun MessageItem(
 @Composable
 private fun chatBodyStyle(base: TextStyle): TextStyle {
     val size = LocalChatFontSize.current
-    return base.copy(fontSize = size.sp, lineHeight = (size * 1.45f).sp)
+    return base.copy(fontSize = size.sp, lineHeight = (size * 1.55f).sp)
 }
 
 @Composable
