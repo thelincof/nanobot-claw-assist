@@ -22,7 +22,10 @@ prerm = pathlib.Path(sys.argv[2])
 def patch(path: pathlib.Path, marker: str, replacement: list[str]) -> None:
     if not path.exists():
         return
-    lines = path.read_text().splitlines(keepends=True)
+    text = path.read_text()
+    if replacement[0] in text:
+        return
+    lines = text.splitlines(keepends=True)
     out: list[str] = []
     for line in lines:
         if marker in line:
@@ -36,9 +39,11 @@ patch(
     postinst,
     "xdg-desktop-menu install",
     [
+        "ln -sf /opt/clawd/bin/clawd /usr/bin/clawd",
         "mkdir -p /usr/share/applications 2>/dev/null || true",
-        "if command -v xdg-desktop-menu >/dev/null 2>&1; then",
-        "    xdg-desktop-menu install /opt/clawd/lib/clawd-clawd.desktop || true",
+        "install -m 644 /opt/clawd/lib/clawd-clawd.desktop /usr/share/applications/clawd.desktop 2>/dev/null || true",
+        "if command -v update-desktop-database >/dev/null 2>&1; then",
+        "    update-desktop-database /usr/share/applications >/dev/null 2>&1 || true",
         "fi",
     ],
 )
@@ -49,9 +54,21 @@ patch(
         "if command -v xdg-desktop-menu >/dev/null 2>&1; then",
         "    xdg-desktop-menu uninstall /opt/clawd/lib/clawd-clawd.desktop || true",
         "fi",
+        "rm -f /usr/bin/clawd /usr/share/applications/clawd.desktop",
+        "if command -v update-desktop-database >/dev/null 2>&1; then",
+        "    update-desktop-database /usr/share/applications >/dev/null 2>&1 || true",
+        "fi",
     ],
 )
 PY
+
+desktop="$work/root/opt/clawd/lib/clawd-clawd.desktop"
+if [[ -f "$desktop" ]]; then
+    sed -i \
+        -e 's/^Name=clawd$/Name=Clawd/' \
+        -e 's/^Categories=.*/Categories=Network;/' \
+        "$desktop"
+fi
 
 sh -n "$work/root/DEBIAN/postinst"
 sh -n "$work/root/DEBIAN/prerm"
