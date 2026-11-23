@@ -138,7 +138,10 @@ class SettingsRepository(private val settings: Settings) {
     fun cachedThread(sessionKey: String): WebUiThreadPayload? = runCatching {
         val raw = settings.getString(threadCacheKey(sessionKey), "")
         if (raw.isBlank()) return@runCatching null
-        sessionJson.decodeFromString(WebUiThreadPayload.serializer(), raw)
+        val payload = sessionJson.decodeFromString(WebUiThreadPayload.serializer(), raw)
+        // Ignore caches written by the old id-based page merge: they can contain
+        // turns in the middle of history.
+        payload.takeIf { it.cacheVersion >= THREAD_CACHE_VERSION }
     }.getOrNull()
 
     fun setCachedThread(sessionKey: String, payload: WebUiThreadPayload) {
@@ -147,7 +150,7 @@ class SettingsRepository(private val settings: Settings) {
                 threadCacheKey(sessionKey),
                 sessionJson.encodeToString(
                     WebUiThreadPayload.serializer(),
-                    payload,
+                    payload.copy(cacheVersion = THREAD_CACHE_VERSION),
                 ),
             )
         }
@@ -193,6 +196,7 @@ class SettingsRepository(private val settings: Settings) {
         const val KEY_PINNED_CACHE = "sessions.pinned"
         const val KEY_ARCHIVED_CACHE = "sessions.archived"
         const val KEY_THREAD_CACHE_PREFIX = "sessions.thread."
+        const val THREAD_CACHE_VERSION = 2
     }
 }
 

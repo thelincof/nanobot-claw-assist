@@ -267,6 +267,8 @@ data class GoalStatePayload(
 @Serializable
 data class WebUiThreadPayload(
     @SerialName("schemaVersion") val schemaVersion: Int = 0,
+    /** Local cache format version; absent in gateway responses and legacy caches. */
+    val cacheVersion: Int = 0,
     @SerialName("sessionKey") val sessionKey: String? = null,
     @SerialName("savedAt") val savedAt: String? = null,
     val messages: List<UiMessage> = emptyList(),

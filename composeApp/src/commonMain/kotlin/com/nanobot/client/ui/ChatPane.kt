@@ -283,7 +283,9 @@ private fun ConnectionBanner(
 private fun MessageList(controller: AppController, state: AppState) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    var initialScrollDone by remember(state.chatId) { mutableStateOf(false) }
+    var pendingHistoryAnchor by remember(state.chatId) {
+        mutableStateOf<Pair<String, Int>?>(null)
+    }
     val messages = state.messages
     val currentTurnVisible = state.activeTurnId?.let { turnId ->
         messages.any { message ->
@@ -308,25 +310,34 @@ private fun MessageList(controller: AppController, state: AppState) {
     }
 
     LaunchedEffect(state.chatId, state.messagesLoading) {
-        if (!state.messagesLoading) {
-            if (messages.isNotEmpty()) listState.scrollToBottom(bottomIndex)
-            initialScrollDone = true
-        } else {
-            initialScrollDone = false
+        if (!state.messagesLoading && messages.isNotEmpty()) {
+            listState.scrollToBottom(bottomIndex)
         }
     }
     LaunchedEffect(
-        initialScrollDone,
-        state.historyHasMore,
+        messages.size,
         state.historyLoadingOlder,
-        state.historyLoadFailed,
-        listState.firstVisibleItemIndex,
+        state.historyBeforeCursor,
+        state.historyHasMore,
     ) {
-        if (initialScrollDone && state.historyHasMore && !state.historyLoadingOlder &&
-            !state.historyLoadFailed && listState.firstVisibleItemIndex <= 1
-        ) {
-            controller.loadOlderHistory()
+        if (state.historyLoadingOlder) return@LaunchedEffect
+        val anchor = pendingHistoryAnchor ?: return@LaunchedEffect
+        val anchoredIndex = messages.indexOfFirst { messageKey(it) == anchor.first }
+        if (anchoredIndex >= 0) {
+            val loaderOffset = if (state.historyHasMore) 1 else 0
+            listState.scrollToItem(anchoredIndex + loaderOffset, anchor.second)
         }
+        pendingHistoryAnchor = null
+    }
+    fun requestOlderHistory() {
+        if (messages.isNotEmpty()) {
+            val loaderOffset = if (state.historyHasMore || state.historyLoadingOlder) 1 else 0
+            val messageIndex = (listState.firstVisibleItemIndex - loaderOffset)
+                .coerceIn(0, messages.lastIndex)
+            pendingHistoryAnchor =
+                messageKey(messages[messageIndex]) to listState.firstVisibleItemScrollOffset
+        }
+        controller.loadOlderHistory()
     }
     val last = messages.lastOrNull()
     LaunchedEffect(
@@ -361,7 +372,7 @@ private fun MessageList(controller: AppController, state: AppState) {
                         item(key = "history-loader") {
                             HistoryLoaderRow(
                                 loading = state.historyLoadingOlder,
-                                onLoad = controller::loadOlderHistory,
+                                onLoad = { requestOlderHistory() },
                             )
                         }
                     }
@@ -392,7 +403,7 @@ private fun MessageList(controller: AppController, state: AppState) {
 @Composable
 private fun HistoryLoaderRow(loading: Boolean, onLoad: () -> Unit) {
     Box(
-        Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        Modifier.fillMaxWidth().height(40.dp),
         contentAlignment = Alignment.Center,
     ) {
         if (loading) {

@@ -1585,7 +1585,7 @@ class JvmAppController(
             val payload = gateway.api().thread(sessionKey)
             if (currentChatId != chatId || generation != loadGeneration) return
             val eventProjection = if (payload.projection == "events" || payload.events.isNotEmpty()) {
-                canonicalEvents = mergeEvents(canonicalEvents, payload.events)
+                canonicalEvents = TranscriptMerge.mergeEvents(canonicalEvents, payload.events)
                 ThreadEventMapper.project(canonicalEvents)
             } else {
                 if (payload.messages.isNotEmpty()) canonicalEvents = emptyList()
@@ -1607,7 +1607,11 @@ class JvmAppController(
                 }
                 return
             }
-            canonical = mergeMessages(canonical, loadedMessages)
+            // The latest page is a contiguous suffix of the transcript. Replace
+            // the whole turns it contains instead of merging individual rows:
+            // otherwise an updated turn can be inserted into the middle by
+            // MessageProjector or duplicated when the server reissues its ids.
+            canonical = TranscriptMerge.replaceRecent(canonical, loadedMessages)
             payload.completedTurnIds?.let { completedTurns.addAll(it) }
             eventProjection?.goalState?.let { goal -> update { it.copy(goal = goal) } }
 
@@ -1734,7 +1738,7 @@ class JvmAppController(
                 if (currentChatId != chatId || generation != loadGeneration) return@launch
 
                 val eventProjection = if (payload.projection == "events" || payload.events.isNotEmpty()) {
-                    canonicalEvents = mergeEvents(payload.events, canonicalEvents)
+                    canonicalEvents = TranscriptMerge.mergeEvents(payload.events, canonicalEvents)
                     ThreadEventMapper.project(canonicalEvents)
                 } else {
                     null
@@ -1743,7 +1747,7 @@ class JvmAppController(
                 if (olderMessages.isEmpty() && payload.events.isEmpty() && payload.messages.isEmpty()) {
                     logD("thread: older page is empty key=${session.key}")
                 }
-                canonical = mergeMessages(olderMessages, canonical)
+                canonical = TranscriptMerge.prependOlder(olderMessages, canonical)
                 payload.completedTurnIds?.let { completedTurns.addAll(it) }
 
                 val page = payload.page
@@ -2084,40 +2088,6 @@ class JvmAppController(
 
     private fun project(): List<UiMessage> =
         MessageProjector.project(canonical, transient, optimistic)
-
-    /** Prepend or refresh transcript pages without duplicating messages. */
-    private fun mergeMessages(
-        older: List<UiMessage>,
-        newer: List<UiMessage>,
-    ): List<UiMessage> {
-        if (older.isEmpty()) return newer
-        if (newer.isEmpty()) return older
-        val merged = linkedMapOf<String, UiMessage>()
-        fun key(message: UiMessage): String =
-            message.id.ifBlank {
-                "${message.turnId.orEmpty()}:${message.role}:${message.createdAt}"
-            }
-        older.forEach { merged[key(it)] = it }
-        newer.forEach { merged[key(it)] = it }
-        return merged.values.toList()
-    }
-
-    /**
-     * Event pages are appended and deduplicated by their full content. Keeping
-     * the raw events lets ThreadEventMapper rebuild one activity card per turn
-     * even when a page boundary falls inside that turn.
-     */
-    private fun mergeEvents(
-        older: List<JsonObject>,
-        newer: List<JsonObject>,
-    ): List<JsonObject> {
-        if (older.isEmpty()) return newer
-        if (newer.isEmpty()) return older
-        val merged = linkedMapOf<String, JsonObject>()
-        older.forEach { merged[it.toString()] = it }
-        newer.forEach { merged[it.toString()] = it }
-        return merged.values.toList()
-    }
 
     private fun mergeTools(
         existing: List<ToolProgressEvent>?,
