@@ -160,7 +160,7 @@ private fun ToolsSection(
     traces: List<String>,
     isStreaming: Boolean,
 ) {
-    var open by remember { mutableStateOf(isStreaming) }
+    var open by remember { mutableStateOf(false) }
     val failed = tools.any { it.error != null || it.phase.isFailurePhase() }
     val running = isStreaming || tools.any { it.phase.isRunningPhase() }
 
@@ -234,7 +234,7 @@ private fun ToolsSection(
 
 @Composable
 private fun FilesSection(edits: List<UiFileEdit>) {
-    var open by remember { mutableStateOf(true) }
+    var open by remember { mutableStateOf(false) }
     Surface(
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),

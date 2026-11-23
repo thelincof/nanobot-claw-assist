@@ -763,6 +763,11 @@ class JvmAppController(
 
     private fun startVoiceInternal(assistant: Boolean) {
         logD("assistant: startVoice assistant=$assistant, phase=${mutableState.value.voice.phase}, ws=${mutableState.value.wsConnected}")
+        if (isTurnActive()) {
+            logD("assistant: voice ignored while the current chat turn is active")
+            if (assistant) update { it.copy(assistantLaunching = false) }
+            return
+        }
         when (mutableState.value.voice.phase) {
             VoicePhase.LISTENING, VoicePhase.SPEECH -> {
                 if (!assistant) {
@@ -1502,6 +1507,12 @@ class JvmAppController(
                 )
             }
         }
+    }
+
+    private fun isTurnActive(): Boolean {
+        val state = mutableState.value
+        return state.sending || state.awaitingFirstToken ||
+            state.activeTurnId != null || state.stopping
     }
 
     private fun clearStreamingFlags() {

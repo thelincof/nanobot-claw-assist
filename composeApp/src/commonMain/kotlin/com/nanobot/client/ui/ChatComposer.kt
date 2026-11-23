@@ -344,7 +344,9 @@ fun ChatComposer(
                                         }
                                     },
                             )
-                            // Mic / record button
+                            // Mic / record button. Voice input is unavailable while
+                            // this chat has an active turn, just like text sending.
+                            val micEnabled = connected && !turnActive
                             Surface(
                                 onClick = {
                                     if (!micPermission.granted) {
@@ -353,9 +355,9 @@ fun ChatComposer(
                                         controller.startVoice()
                                     }
                                 },
-                                enabled = connected,
+                                enabled = micEnabled,
                                 shape = CircleShape,
-                                color = if (connected) scheme.primary else scheme.surfaceVariant,
+                                color = if (micEnabled) scheme.primary else scheme.surfaceVariant,
                                 modifier = Modifier.size(42.dp),
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
@@ -363,13 +365,17 @@ fun ChatComposer(
                                         CircularProgressIndicator(
                                             modifier = Modifier.size(18.dp),
                                             strokeWidth = 2.dp,
-                                            color = scheme.onPrimary,
+                                            color = if (micEnabled) scheme.onPrimary else scheme.onSurfaceVariant,
                                         )
                                     } else {
                                         Icon(
                                             Icons.Rounded.Mic,
                                             contentDescription = stringResource(Res.string.mic),
-                                            tint = if (micPermission.granted) scheme.onPrimary else scheme.onSurfaceVariant,
+                                            tint = if (micEnabled && micPermission.granted) {
+                                                scheme.onPrimary
+                                            } else {
+                                                scheme.onSurfaceVariant
+                                            },
                                         )
                                     }
                                 }

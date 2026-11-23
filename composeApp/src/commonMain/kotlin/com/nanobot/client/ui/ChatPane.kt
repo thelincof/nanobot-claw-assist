@@ -19,9 +19,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowDownward
-import androidx.compose.material.icons.rounded.BrightnessAuto
-import androidx.compose.material.icons.rounded.DarkMode
-import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SmartToy
@@ -239,28 +236,6 @@ private fun ChatTopBar(
                         state.tts.enabled -> MaterialTheme.colorScheme.onSurface
                         else -> ui.sidebarMuted
                     },
-                )
-            }
-            // Переключатель темы, как иконка луны в webui: system → light → dark
-            val themeIcon = when (state.settings.themeMode) {
-                "light" -> Icons.Rounded.LightMode
-                "dark" -> Icons.Rounded.DarkMode
-                else -> Icons.Rounded.BrightnessAuto
-            }
-            IconButton(
-                onClick = {
-                    val next = when (state.settings.themeMode) {
-                        "system" -> "light"
-                        "light" -> "dark"
-                        else -> "system"
-                    }
-                    controller.saveSettings(state.settings.copy(themeMode = next))
-                },
-            ) {
-                Icon(
-                    themeIcon,
-                    contentDescription = stringResource(Res.string.theme),
-                    tint = ui.sidebarMuted,
                 )
             }
             IconButton(onClick = onOpenSettings) {

@@ -48,10 +48,23 @@ fun App() {
     var pendingAssistantForceListen by remember { mutableStateOf(false) }
     val assistantRequests by AssistantLaunch.requests.collectAsState()
 
+    // Voice input and hotword belong to the currently open chat. While its
+    // turn is running they must stay out of the way: no recording, no second
+    // assistant request, and no Vosk model churn during streaming.
+    val agentBusy = state.sending || state.awaitingFirstToken ||
+        state.activeTurnId != null || state.stopping
+
+    LaunchedEffect(agentBusy, state.voice.active) {
+        if (agentBusy && state.voice.active) {
+            controller.cancelVoice()
+        }
+    }
+
     HotwordEffect(
         enabled = state.settings.hotwordEnabled && state.connection.phase == ConnectionPhase.CONNECTED,
         phrase = state.settings.hotwordPhrase,
-        active = state.voice.phase == VoicePhase.IDLE &&
+        active = !agentBusy &&
+            state.voice.phase == VoicePhase.IDLE &&
             !state.tts.speaking &&
             !state.tts.loading &&
             !state.assistantLaunching,
