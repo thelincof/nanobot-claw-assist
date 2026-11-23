@@ -52,11 +52,19 @@ class GatewayApi(
             com.nanobot.client.core.model.AutomationResultPayload.serializer(),
         )
 
-    suspend fun thread(sessionKey: String): com.nanobot.client.core.model.WebUiThreadPayload =
-        request(
-            "/api/sessions/${sessionKey.pathEncoded()}/webui-thread?limit=160&direction=latest",
+    suspend fun thread(
+        sessionKey: String,
+        before: String? = null,
+    ): com.nanobot.client.core.model.WebUiThreadPayload {
+        val cursor = before
+            ?.takeIf { it.isNotBlank() }
+            ?.let { "&before=${it.pathEncoded()}" }
+            .orEmpty()
+        return request(
+            "/api/sessions/${sessionKey.pathEncoded()}/webui-thread?limit=160&direction=latest$cursor",
             com.nanobot.client.core.model.WebUiThreadPayload.serializer(),
         )
+    }
 
     private suspend fun <T> request(
         path: String,

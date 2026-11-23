@@ -11,9 +11,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -45,8 +48,10 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -62,7 +67,6 @@ import com.nanobot.client.resources.Res
 import com.nanobot.client.resources.chat_untitled
 import com.nanobot.client.resources.choose_chat
 import com.nanobot.client.resources.empty_state_title
-import com.nanobot.client.resources.theme
 import com.nanobot.client.resources.choose_chat_hint
 import com.nanobot.client.resources.connection_failed
 import com.nanobot.client.resources.connection_lost
@@ -70,6 +74,7 @@ import com.nanobot.client.resources.reconnecting
 import com.nanobot.client.resources.reconnecting_hint
 import com.nanobot.client.resources.empty_chat_hint
 import com.nanobot.client.resources.empty_chat_title
+import com.nanobot.client.resources.load_earlier
 import com.nanobot.client.resources.loading
 import com.nanobot.client.resources.thinking_placeholder
 import com.nanobot.client.resources.link_restoring
@@ -278,6 +283,7 @@ private fun ConnectionBanner(
 private fun MessageList(controller: AppController, state: AppState) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    var initialScrollDone by remember(state.chatId) { mutableStateOf(false) }
     val messages = state.messages
     val currentTurnVisible = state.activeTurnId?.let { turnId ->
         messages.any { message ->
@@ -287,17 +293,39 @@ private fun MessageList(controller: AppController, state: AppState) {
     } ?: false
     val showPending = state.sending || state.awaitingFirstToken ||
         (state.activeTurnId != null && !currentTurnVisible)
-    val atBottom by remember(messages.size) {
+    val bottomIndex = messages.lastIndex + if (showPending) 1 else 0
+    // The last item can be taller than the viewport (expanded activity). Being
+    // "at the last index" is not the same as being at the bottom; otherwise a
+    // stream update yanks the list back to that item's header.
+    val atBottom by remember(messages.size, showPending) {
         derivedStateOf {
             val info = listState.layoutInfo
-            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: -1
-            lastVisible >= messages.lastIndex - 1
+            val lastVisible = info.visibleItemsInfo.lastOrNull()
+                ?: return@derivedStateOf true
+            lastVisible.index >= info.totalItemsCount - 1 &&
+                lastVisible.offset + lastVisible.size <= info.viewportEndOffset + 4
         }
     }
 
     LaunchedEffect(state.chatId, state.messagesLoading) {
-        if (!state.messagesLoading && messages.isNotEmpty()) {
-            listState.scrollToItem(messages.lastIndex)
+        if (!state.messagesLoading) {
+            if (messages.isNotEmpty()) listState.scrollToBottom(bottomIndex)
+            initialScrollDone = true
+        } else {
+            initialScrollDone = false
+        }
+    }
+    LaunchedEffect(
+        initialScrollDone,
+        state.historyHasMore,
+        state.historyLoadingOlder,
+        state.historyLoadFailed,
+        listState.firstVisibleItemIndex,
+    ) {
+        if (initialScrollDone && state.historyHasMore && !state.historyLoadingOlder &&
+            !state.historyLoadFailed && listState.firstVisibleItemIndex <= 1
+        ) {
+            controller.loadOlderHistory()
         }
     }
     val last = messages.lastOrNull()
@@ -311,8 +339,8 @@ private fun MessageList(controller: AppController, state: AppState) {
         state.awaitingFirstToken,
         showPending,
     ) {
-        if (last != null && atBottom && messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.lastIndex)
+        if (last != null && atBottom && bottomIndex >= 0) {
+            listState.animateToBottom(bottomIndex)
         }
     }
 
@@ -329,6 +357,14 @@ private fun MessageList(controller: AppController, state: AppState) {
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
+                    if (state.historyHasMore || state.historyLoadingOlder) {
+                        item(key = "history-loader") {
+                            HistoryLoaderRow(
+                                loading = state.historyLoadingOlder,
+                                onLoad = controller::loadOlderHistory,
+                            )
+                        }
+                    }
                     itemsIndexed(messages, key = { _, message -> messageKey(message) }) { _, message ->
                         MessageItem(
                             message = message,
@@ -344,13 +380,65 @@ private fun MessageList(controller: AppController, state: AppState) {
         }
         if (!atBottom && messages.isNotEmpty()) {
             SmallFloatingActionButton(
-                onClick = { scope.launch { listState.animateScrollToItem(messages.lastIndex) } },
+                onClick = { scope.launch { listState.animateToBottom(bottomIndex) } },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
             ) {
                 Icon(Icons.Rounded.ArrowDownward, contentDescription = null)
             }
         }
     }
+}
+
+@Composable
+private fun HistoryLoaderRow(loading: Boolean, onLoad: () -> Unit) {
+    Box(
+        Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (loading) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    stringResource(Res.string.loading),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            TextButton(onClick = onLoad) {
+                Text(stringResource(Res.string.load_earlier))
+            }
+        }
+    }
+}
+
+private suspend fun LazyListState.scrollToBottom(index: Int) {
+    if (index < 0) return
+    scrollToItem(index)
+    scrollRemainingToBottom(index)
+}
+
+private suspend fun LazyListState.animateToBottom(index: Int) {
+    if (index < 0) return
+    // While streaming the item is already visible. Scroll only by the amount it
+    // grew; animating to its top first would visibly jump to the block header.
+    val layout = layoutInfo
+    val visibleItem = layout.visibleItemsInfo.firstOrNull { it.index == index }
+    if (visibleItem != null) {
+        val remaining = visibleItem.offset + visibleItem.size - layout.viewportEndOffset
+        if (remaining > 0) animateScrollBy(remaining.toFloat())
+        return
+    }
+    animateScrollToItem(index)
+    scrollRemainingToBottom(index)
+}
+
+private suspend fun LazyListState.scrollRemainingToBottom(index: Int) {
+    val layout = layoutInfo
+    val item = layout.visibleItemsInfo.firstOrNull { it.index == index } ?: return
+    val remaining = item.offset + item.size - layout.viewportEndOffset
+    if (remaining > 0) scrollBy(remaining.toFloat())
 }
 
 @Composable

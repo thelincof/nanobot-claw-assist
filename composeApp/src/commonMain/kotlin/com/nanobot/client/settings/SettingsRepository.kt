@@ -147,7 +147,7 @@ class SettingsRepository(private val settings: Settings) {
                 threadCacheKey(sessionKey),
                 sessionJson.encodeToString(
                     WebUiThreadPayload.serializer(),
-                    payload.copy(messages = payload.messages.takeLast(160)),
+                    payload,
                 ),
             )
         }

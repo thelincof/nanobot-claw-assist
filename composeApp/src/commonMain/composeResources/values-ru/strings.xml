@@ -81,6 +81,7 @@
     <string name="show_more">Показать полностью</string>
     <string name="send_failed">Не удалось отправить</string>
     <string name="loading">Загрузка…</string>
+    <string name="load_earlier">Загрузить ранее</string>
     <string name="load_more">Загрузить ещё</string>
 
     <string name="tts_on">Голос включён</string>

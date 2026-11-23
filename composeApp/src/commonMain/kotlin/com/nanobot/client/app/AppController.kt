@@ -68,6 +68,11 @@ data class AppState(
     val messages: List<UiMessage> = emptyList(),
     val messagesLoading: Boolean = false,
     val messagesError: String? = null,
+    /** Older transcript pages still exist on the gateway. */
+    val historyHasMore: Boolean = false,
+    val historyBeforeCursor: String? = null,
+    val historyLoadingOlder: Boolean = false,
+    val historyLoadFailed: Boolean = false,
     val sending: Boolean = false,
     /** True between "message sent" and the first streamed token/tool event. */
     val awaitingFirstToken: Boolean = false,
@@ -138,6 +143,7 @@ interface AppController {
     fun newChat()
     fun deleteSession(session: SessionRow)
     fun deleteSessions(sessions: List<SessionRow>)
+    fun loadOlderHistory()
     fun send(text: String, attachments: List<LocalAttachment> = emptyList())
     fun stopTurn()
     fun toggleTts()

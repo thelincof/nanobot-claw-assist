@@ -144,9 +144,7 @@ private fun ReasoningSection(reasoning: String, isStreaming: Boolean) {
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .padding(10.dp)
-                            .horizontalScroll(rememberScrollState()),
+                        modifier = Modifier.padding(10.dp),
                     )
                 }
             }

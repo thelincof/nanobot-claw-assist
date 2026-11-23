@@ -250,6 +250,9 @@ data class ThreadPage(
     @SerialName("has_more_before") val hasMoreBefore: Boolean = false,
     @SerialName("loaded_message_count") val loadedMessageCount: Int? = null,
     @SerialName("total_known_message_count") val totalKnownMessageCount: Int? = null,
+    /** Nanobot 0.4+ events projection reports counts in events, not messages. */
+    @SerialName("loaded_event_count") val loadedEventCount: Int? = null,
+    @SerialName("total_known_event_count") val totalKnownEventCount: Int? = null,
 )
 
 @Serializable

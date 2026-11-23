@@ -27,6 +27,7 @@ import com.nanobot.client.core.model.ReasoningEndEvent
 import com.nanobot.client.core.model.SessionRow
 import com.nanobot.client.core.model.StreamEndEvent
 import com.nanobot.client.core.model.ThreadEventMapper
+import com.nanobot.client.core.model.ThreadPage
 import com.nanobot.client.core.model.ToolProgressEvent
 import com.nanobot.client.core.model.TurnEndEvent
 import com.nanobot.client.core.model.UiFileEdit
@@ -88,6 +89,9 @@ class JvmAppController(
     private var started = false
     private var currentChatId: String? = null
     private var canonical: List<UiMessage> = emptyList()
+    /** Raw 0.4+ event pages, kept so pagination can project a turn exactly once. */
+    private var canonicalEvents: List<JsonObject> = emptyList()
+    private var historyCursorInitialized = false
     private val transient = linkedMapOf<String, UiMessage>()
     private val optimistic = linkedMapOf<String, UiMessage>()
     private val completedTurns = mutableSetOf<String>()
@@ -609,6 +613,9 @@ class JvmAppController(
         currentChatId = chatId
         val cachedThread = settings.cachedThread(session.key)
         canonical = cachedThread?.messages.orEmpty()
+        canonicalEvents = cachedThread?.events.orEmpty()
+        val cachedPage = cachedThread?.page
+        historyCursorInitialized = cachedPage != null
         transient.clear()
         optimistic.clear()
         completedTurns.clear()
@@ -622,6 +629,10 @@ class JvmAppController(
                 messages = canonical,
                 messagesLoading = cachedThread == null,
                 messagesError = null,
+                historyHasMore = cachedPage?.hasMoreBefore == true,
+                historyBeforeCursor = cachedPage?.beforeCursor,
+                historyLoadingOlder = false,
+                historyLoadFailed = false,
                 sending = false,
                 awaitingFirstToken = false,
                 activeTurnId = null,
@@ -1399,6 +1410,8 @@ class JvmAppController(
             currentChatId = chatId
             pendingTurnId = null
             canonical = emptyList()
+            canonicalEvents = emptyList()
+            historyCursorInitialized = false
             transient.clear()
             optimistic.clear()
             completedTurns.clear()
@@ -1423,6 +1436,10 @@ class JvmAppController(
                     messages = emptyList(),
                     messagesLoading = false,
                     messagesError = null,
+                    historyHasMore = false,
+                    historyBeforeCursor = null,
+                    historyLoadingOlder = false,
+                    historyLoadFailed = false,
                     sending = false,
                     awaitingFirstToken = false,
                     activeTurnId = null,
@@ -1527,6 +1544,8 @@ class JvmAppController(
         currentChatId = null
         pendingTurnId = null
         canonical = emptyList()
+        canonicalEvents = emptyList()
+        historyCursorInitialized = false
         transient.clear()
         optimistic.clear()
         completedTurns.clear()
@@ -1542,6 +1561,10 @@ class JvmAppController(
                 messages = emptyList(),
                 messagesLoading = false,
                 messagesError = null,
+                historyHasMore = false,
+                historyBeforeCursor = null,
+                historyLoadingOlder = false,
+                historyLoadFailed = false,
                 sending = false,
                 awaitingFirstToken = false,
                 activeTurnId = null,
@@ -1561,27 +1584,52 @@ class JvmAppController(
             logD("thread: load key=$sessionKey chat=$chatId")
             val payload = gateway.api().thread(sessionKey)
             if (currentChatId != chatId || generation != loadGeneration) return
-            val projection = if (payload.messages.isEmpty() && payload.events.isNotEmpty()) {
-                ThreadEventMapper.project(payload.events)
+            val eventProjection = if (payload.projection == "events" || payload.events.isNotEmpty()) {
+                canonicalEvents = mergeEvents(canonicalEvents, payload.events)
+                ThreadEventMapper.project(canonicalEvents)
             } else {
+                if (payload.messages.isNotEmpty()) canonicalEvents = emptyList()
                 null
             }
-            val loadedMessages = projection?.messages ?: payload.messages
+            val loadedMessages = eventProjection?.messages ?: payload.messages
             logD(
                 "thread: loaded key=$sessionKey messages=${loadedMessages.size} " +
                     "events=${payload.events.size} active=${payload.activeTurnId}",
             )
             if (loadedMessages.isEmpty() && canonical.isNotEmpty()) {
                 // A transient/stale empty response must not erase a cached thread.
-                update { it.copy(messagesLoading = false) }
+                update {
+                    it.copy(
+                        messagesLoading = false,
+                        historyLoadingOlder = false,
+                        historyLoadFailed = false,
+                    )
+                }
                 return
             }
-            canonical = loadedMessages
+            canonical = mergeMessages(canonical, loadedMessages)
             payload.completedTurnIds?.let { completedTurns.addAll(it) }
-            projection?.goalState?.let { goal -> update { it.copy(goal = goal) } }
+            eventProjection?.goalState?.let { goal -> update { it.copy(goal = goal) } }
+
+            val page = payload.page
+            val usePayloadPage = !historyCursorInitialized
+            val nextHasMore = if (usePayloadPage) page?.hasMoreBefore == true else mutableState.value.historyHasMore
+            val nextCursor = if (usePayloadPage) page?.beforeCursor else mutableState.value.historyBeforeCursor
+            historyCursorInitialized = true
             settings.setCachedThread(
                 sessionKey,
-                payload.copy(messages = loadedMessages, events = emptyList()),
+                payload.copy(
+                    messages = canonical,
+                    events = canonicalEvents,
+                    page = ThreadPage(
+                        beforeCursor = nextCursor,
+                        hasMoreBefore = nextHasMore,
+                        loadedMessageCount = canonical.size,
+                        totalKnownMessageCount = page?.totalKnownMessageCount,
+                        loadedEventCount = page?.loadedEventCount,
+                        totalKnownEventCount = page?.totalKnownEventCount,
+                    ),
+                ),
             )
             val canonicalTurns = canonical.mapNotNull { it.turnId }.toSet()
             transient.keys
@@ -1610,6 +1658,10 @@ class JvmAppController(
                 it.copy(
                     messages = project(),
                     messagesLoading = false,
+                    historyHasMore = nextHasMore,
+                    historyBeforeCursor = nextCursor,
+                    historyLoadingOlder = false,
+                    historyLoadFailed = false,
                     activeTurnId = activeTurn,
                     // A server snapshot may briefly report active_turn_id=null
                     // while a locally started turn is still being accepted.
@@ -1625,7 +1677,17 @@ class JvmAppController(
                 // message. That is an empty thread, not a user-visible error.
                 logD("thread: empty/new session key=$sessionKey")
                 if (currentChatId == chatId && generation == loadGeneration) {
-                    update { it.copy(messagesLoading = false, messagesError = null) }
+                    historyCursorInitialized = false
+                    update {
+                        it.copy(
+                            messagesLoading = false,
+                            messagesError = null,
+                            historyHasMore = false,
+                            historyBeforeCursor = null,
+                            historyLoadingOlder = false,
+                            historyLoadFailed = false,
+                        )
+                    }
                 }
                 return
             }
@@ -1634,6 +1696,7 @@ class JvmAppController(
                 update {
                     it.copy(
                         messagesLoading = false,
+                        historyLoadingOlder = false,
                         messagesError = error.message ?: "Не удалось загрузить историю",
                     )
                 }
@@ -1644,8 +1707,108 @@ class JvmAppController(
                 update {
                     it.copy(
                         messagesLoading = false,
+                        historyLoadingOlder = false,
                         messagesError = error.message ?: "Не удалось загрузить историю",
                     )
+                }
+            }
+        }
+    }
+
+    override fun loadOlderHistory() {
+        val state = mutableState.value
+        if (state.historyLoadingOlder || !state.historyHasMore) return
+        val cursor = state.historyBeforeCursor
+        if (cursor.isNullOrBlank()) {
+            update { it.copy(historyHasMore = false, historyBeforeCursor = null) }
+            return
+        }
+        val chatId = currentChatId ?: return
+        val session = state.selectedSession ?: return
+        val generation = loadGeneration
+        update { it.copy(historyLoadingOlder = true, historyLoadFailed = false) }
+        scope.launch {
+            try {
+                logD("thread: load older key=${session.key} cursor=$cursor")
+                val payload = gateway.api().thread(session.key, before = cursor)
+                if (currentChatId != chatId || generation != loadGeneration) return@launch
+
+                val eventProjection = if (payload.projection == "events" || payload.events.isNotEmpty()) {
+                    canonicalEvents = mergeEvents(payload.events, canonicalEvents)
+                    ThreadEventMapper.project(canonicalEvents)
+                } else {
+                    null
+                }
+                val olderMessages = eventProjection?.messages ?: payload.messages
+                if (olderMessages.isEmpty() && payload.events.isEmpty() && payload.messages.isEmpty()) {
+                    logD("thread: older page is empty key=${session.key}")
+                }
+                canonical = mergeMessages(olderMessages, canonical)
+                payload.completedTurnIds?.let { completedTurns.addAll(it) }
+
+                val page = payload.page
+                val hasMore = page?.hasMoreBefore == true
+                val beforeCursor = page?.beforeCursor
+                historyCursorInitialized = true
+                settings.setCachedThread(
+                    session.key,
+                    payload.copy(
+                        messages = canonical,
+                        events = canonicalEvents,
+                        page = ThreadPage(
+                            beforeCursor = beforeCursor,
+                            hasMoreBefore = hasMore,
+                            loadedMessageCount = canonical.size,
+                            totalKnownMessageCount = page?.totalKnownMessageCount,
+                            loadedEventCount = page?.loadedEventCount,
+                            totalKnownEventCount = page?.totalKnownEventCount,
+                        ),
+                    ),
+                )
+                update {
+                    it.copy(
+                        messages = project(),
+                        historyHasMore = hasMore,
+                        historyBeforeCursor = beforeCursor,
+                        historyLoadingOlder = false,
+                        historyLoadFailed = false,
+                    )
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: GatewayException) {
+                logD("thread: load older failed key=${session.key} error=${error.javaClass.simpleName}: ${error.message}")
+                if (currentChatId == chatId && generation == loadGeneration) {
+                    if (error.status == 404) {
+                        historyCursorInitialized = false
+                        update {
+                            it.copy(
+                                historyHasMore = false,
+                                historyBeforeCursor = null,
+                                historyLoadingOlder = false,
+                                historyLoadFailed = false,
+                            )
+                        }
+                    } else {
+                        update {
+                            it.copy(
+                                historyLoadingOlder = false,
+                                historyLoadFailed = true,
+                                error = friendlyError(error.message),
+                            )
+                        }
+                    }
+                }
+            } catch (error: Exception) {
+                logD("thread: load older failed key=${session.key} error=${error.javaClass.simpleName}: ${error.message}")
+                if (currentChatId == chatId && generation == loadGeneration) {
+                    update {
+                        it.copy(
+                            historyLoadingOlder = false,
+                            historyLoadFailed = true,
+                            error = friendlyError(error.message),
+                        )
+                    }
                 }
             }
         }
@@ -1921,6 +2084,40 @@ class JvmAppController(
 
     private fun project(): List<UiMessage> =
         MessageProjector.project(canonical, transient, optimistic)
+
+    /** Prepend or refresh transcript pages without duplicating messages. */
+    private fun mergeMessages(
+        older: List<UiMessage>,
+        newer: List<UiMessage>,
+    ): List<UiMessage> {
+        if (older.isEmpty()) return newer
+        if (newer.isEmpty()) return older
+        val merged = linkedMapOf<String, UiMessage>()
+        fun key(message: UiMessage): String =
+            message.id.ifBlank {
+                "${message.turnId.orEmpty()}:${message.role}:${message.createdAt}"
+            }
+        older.forEach { merged[key(it)] = it }
+        newer.forEach { merged[key(it)] = it }
+        return merged.values.toList()
+    }
+
+    /**
+     * Event pages are appended and deduplicated by their full content. Keeping
+     * the raw events lets ThreadEventMapper rebuild one activity card per turn
+     * even when a page boundary falls inside that turn.
+     */
+    private fun mergeEvents(
+        older: List<JsonObject>,
+        newer: List<JsonObject>,
+    ): List<JsonObject> {
+        if (older.isEmpty()) return newer
+        if (newer.isEmpty()) return older
+        val merged = linkedMapOf<String, JsonObject>()
+        older.forEach { merged[it.toString()] = it }
+        newer.forEach { merged[it.toString()] = it }
+        return merged.values.toList()
+    }
 
     private fun mergeTools(
         existing: List<ToolProgressEvent>?,
