@@ -409,16 +409,16 @@ private fun EmptyChatState() {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Text("🐱", fontSize = 48.sp)
-        Spacer(Modifier.height(14.dp))
+        Text("🐱", fontSize = 32.sp)
+        Spacer(Modifier.height(12.dp))
         Text(
             stringResource(Res.string.empty_state_title),
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Normal,
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onBackground,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
         Text(
             stringResource(Res.string.empty_chat_hint),
             style = MaterialTheme.typography.bodyMedium,
@@ -435,16 +435,16 @@ private fun ChooseChatState() {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Text("🐱", fontSize = 48.sp)
-        Spacer(Modifier.height(14.dp))
+        Text("🐱", fontSize = 32.sp)
+        Spacer(Modifier.height(12.dp))
         Text(
             stringResource(Res.string.empty_state_title),
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Normal,
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onBackground,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
         Text(
             stringResource(Res.string.choose_chat_hint),
             style = MaterialTheme.typography.bodyMedium,

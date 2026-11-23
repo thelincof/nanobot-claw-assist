@@ -215,13 +215,13 @@ fun ChatComposer(
                     Surface(
                         shape = RoundedCornerShape(22.dp),
                         color = if (goalActive) {
-                            Color(0xFF3B82F6).copy(alpha = 0.08f)
+                            scheme.primary.copy(alpha = 0.08f)
                         } else {
-                            LocalWebUiColors.current.popover
+                            MaterialTheme.colorScheme.surface
                         },
                         border = BorderStroke(
                             if (goalActive) 1.5.dp else 1.dp,
-                            if (goalActive) Color(0xFF3B82F6) else scheme.outline,
+                            if (goalActive) scheme.primary else scheme.outline,
                         ),
                         shadowElevation = if (goalActive) 5.dp else 3.dp,
                         modifier = Modifier.fillMaxWidth(),

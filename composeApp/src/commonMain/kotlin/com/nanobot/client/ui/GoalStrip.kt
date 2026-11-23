@@ -42,8 +42,6 @@ import com.nanobot.client.resources.goal_status_blocked
 import com.nanobot.client.resources.goal_title
 import org.jetbrains.compose.resources.stringResource
 
-private val GoalBlue = Color(0xFF3B82F6)
-
 @Composable
 fun GoalStrip(
     goal: GoalStatePayload,
@@ -52,6 +50,7 @@ fun GoalStrip(
 ) {
     val blocked = goal.status == "blocked" || runtimeStatus == "blocked"
     if (!goal.active && !blocked) return
+    val accent = MaterialTheme.colorScheme.primary
     var expanded by remember(goal.objective, goal.status) { mutableStateOf(false) }
     val statusText = if (blocked) {
         stringResource(Res.string.goal_status_blocked)
@@ -62,8 +61,8 @@ fun GoalStrip(
 
     Surface(
         shape = RoundedCornerShape(12.dp),
-        color = GoalBlue.copy(alpha = 0.10f),
-        border = BorderStroke(1.dp, GoalBlue.copy(alpha = 0.45f)),
+        color = accent.copy(alpha = 0.10f),
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.45f)),
         modifier = modifier.fillMaxWidth(),
     ) {
         Column(Modifier.fillMaxWidth()) {
@@ -78,7 +77,7 @@ fun GoalStrip(
                     Icons.Rounded.Flag,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp),
-                    tint = GoalBlue,
+                    tint = accent,
                 )
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -87,13 +86,13 @@ fun GoalStrip(
                             stringResource(Res.string.goal_title),
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
-                            color = GoalBlue,
+                            color = accent,
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
                             statusText,
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (blocked) MaterialTheme.colorScheme.error else GoalBlue,
+                            color = if (blocked) MaterialTheme.colorScheme.error else accent,
                         )
                     }
                     if (summary.isNotBlank() && !expanded) {
@@ -112,7 +111,7 @@ fun GoalStrip(
                         if (expanded) Res.string.goal_collapse else Res.string.goal_expand,
                     ),
                     modifier = Modifier.size(18.dp),
-                    tint = GoalBlue,
+                    tint = accent,
                 )
             }
             AnimatedVisibility(visible = expanded) {
@@ -124,7 +123,7 @@ fun GoalStrip(
                         Text(
                             stringResource(Res.string.goal_objective),
                             style = MaterialTheme.typography.labelSmall,
-                            color = GoalBlue,
+                            color = accent,
                         )
                         Text(
                             objective,
@@ -136,7 +135,7 @@ fun GoalStrip(
                         Text(
                             stringResource(Res.string.goal_recap),
                             style = MaterialTheme.typography.labelSmall,
-                            color = GoalBlue,
+                            color = accent,
                         )
                         Text(
                             recap,

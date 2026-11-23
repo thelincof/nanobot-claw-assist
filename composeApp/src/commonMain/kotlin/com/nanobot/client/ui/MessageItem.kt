@@ -77,8 +77,16 @@ private fun UserMessageItem(message: UiMessage, mediaBaseUrl: String, modifier: 
     ) {
         Column(horizontalAlignment = Alignment.End) {
             Surface(
-                color = if (message.failed) MaterialTheme.colorScheme.errorContainer else ui.sidebarSelected,
-                contentColor = if (message.failed) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurface,
+                color = if (message.failed) {
+                    MaterialTheme.colorScheme.errorContainer
+                } else {
+                    MaterialTheme.colorScheme.primaryContainer
+                },
+                contentColor = if (message.failed) {
+                    MaterialTheme.colorScheme.onErrorContainer
+                } else {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                },
                 shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.widthIn(max = 620.dp),
             ) {
@@ -137,7 +145,7 @@ private fun UserMessageItem(message: UiMessage, mediaBaseUrl: String, modifier: 
 
 @Composable
 private fun ActivityMessageItem(message: UiMessage, modifier: Modifier) {
-    Column(modifier.fillMaxWidth().padding(start = 44.dp)) {
+    Column(modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp)) {
         AgentActivityCard(message)
     }
 }
@@ -155,70 +163,57 @@ private fun AssistantMessageItem(
         !message.toolEvents.isNullOrEmpty() ||
         !message.fileEdits.isNullOrEmpty() ||
         !message.traces.isNullOrEmpty()
-    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-        // Аватар: скруглённый квадрат с рамкой, как в webui
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.background,
-            border = BorderStroke(1.dp, ui.border),
-            modifier = Modifier.size(34.dp),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Text("🐱", fontSize = 18.sp)
-            }
+    Column(modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp)) {
+        if (message.isStreaming && message.content.isBlank()) {
+            Spacer(Modifier.height(6.dp))
+            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 1.5.dp)
+            Spacer(Modifier.height(6.dp))
         }
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            if (message.isStreaming && message.content.isBlank()) {
-                Spacer(Modifier.height(6.dp))
-                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 1.5.dp)
-                Spacer(Modifier.height(6.dp))
-            }
-            if (hasActivity) {
-                AgentActivityCard(message)
-                if (message.content.isNotBlank()) {
-                    Spacer(Modifier.size(8.dp))
-                }
-            } else if (message.isStreaming && message.content.isBlank()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Spacer(Modifier.width(2.dp))
-                    Text(
-                        stringResource(Res.string.thinking),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = ui.sidebarMuted,
-                    )
-                }
-            }
-            if (message.content.isNotBlank()) {
-                if (message.isStreaming) {
-                    // Incomplete markdown is parsed differently on every delta and has
-                    // historically crashed the markdown renderer mid-stream.
-                    Text(
-                        message.content,
-                        style = chatBodyStyle(MaterialTheme.typography.bodyMedium),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                } else {
-                    MarkdownText(message.content, Modifier.fillMaxWidth())
-                }
-            }
-            MessageMedia(
-                message = message,
-                baseUrl = mediaBaseUrl,
-                modifier = Modifier.padding(top = if (message.content.isNotBlank()) 6.dp else 0.dp),
-            )
-            message.latencyMs?.let { latency ->
-                Spacer(Modifier.size(4.dp))
+        if (hasActivity) {
+            AgentActivityCard(message)
+            if (message.content.isNotBlank()) Spacer(Modifier.size(8.dp))
+        } else if (message.isStreaming && message.content.isBlank()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Spacer(Modifier.width(2.dp))
                 Text(
-                    formatLatency(latency),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = ui.sidebarMuted.copy(alpha = 0.8f),
+                    stringResource(Res.string.thinking),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ui.sidebarMuted,
                 )
             }
         }
         if (message.content.isNotBlank()) {
-            Spacer(Modifier.width(6.dp))
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            if (message.isStreaming) {
+                // Incomplete markdown is parsed differently on every delta and has
+                // historically crashed the markdown renderer mid-stream.
+                Text(
+                    message.content,
+                    style = chatBodyStyle(MaterialTheme.typography.bodyMedium),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                MarkdownText(message.content, Modifier.fillMaxWidth())
+            }
+        }
+        MessageMedia(
+            message = message,
+            baseUrl = mediaBaseUrl,
+            modifier = Modifier.padding(top = if (message.content.isNotBlank()) 6.dp else 0.dp),
+        )
+        message.latencyMs?.let { latency ->
+            Spacer(Modifier.size(4.dp))
+            Text(
+                formatLatency(latency),
+                style = MaterialTheme.typography.labelSmall,
+                color = ui.sidebarMuted.copy(alpha = 0.8f),
+            )
+        }
+        if (message.content.isNotBlank() && !message.isStreaming) {
+            Row(
+                Modifier.fillMaxWidth().padding(top = 2.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 IconButton(
                     onClick = { clipboard.setText(AnnotatedString(message.content)) },
                     modifier = Modifier.size(30.dp),
@@ -230,18 +225,16 @@ private fun AssistantMessageItem(
                         tint = ui.sidebarMuted,
                     )
                 }
-                if (!message.isStreaming) {
-                    IconButton(
-                        onClick = { onSpeak(message.content) },
-                        modifier = Modifier.size(30.dp),
-                    ) {
-                        Icon(
-                            Icons.Rounded.VolumeUp,
-                            contentDescription = stringResource(Res.string.tts_speak),
-                            modifier = Modifier.size(17.dp),
-                            tint = ui.sidebarMuted,
-                        )
-                    }
+                IconButton(
+                    onClick = { onSpeak(message.content) },
+                    modifier = Modifier.size(30.dp),
+                ) {
+                    Icon(
+                        Icons.Rounded.VolumeUp,
+                        contentDescription = stringResource(Res.string.tts_speak),
+                        modifier = Modifier.size(17.dp),
+                        tint = ui.sidebarMuted,
+                    )
                 }
             }
         }

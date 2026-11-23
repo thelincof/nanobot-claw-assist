@@ -213,25 +213,36 @@ fun Sidebar(
                 onClear = { controller.setSearch("") },
                 modifier = Modifier.weight(1f),
             )
-            Spacer(Modifier.width(6.dp))
-            // Круглая кнопка «новый чат», как в webui
-            Surface(
-                onClick = {
-                    controller.newChat()
-                    onClose()
-                },
-                shape = CircleShape,
-                color = Color.Transparent,
-                modifier = Modifier.size(40.dp),
+        }
+
+        Spacer(Modifier.height(10.dp))
+        Surface(
+            onClick = {
+                controller.newChat()
+                onClose()
+            },
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primaryContainer,
+            modifier = Modifier.fillMaxWidth().height(40.dp),
+        ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Rounded.Add,
-                        contentDescription = stringResource(Res.string.new_chat),
-                        tint = LocalWebUiColors.current.sidebarContent,
-                        modifier = Modifier.size(22.dp),
-                    )
-                }
+                Icon(
+                    Icons.Rounded.Add,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    stringResource(Res.string.new_chat),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
             }
         }
 
@@ -1108,7 +1119,7 @@ private fun SessionRowItem(
                     CircularProgressIndicator(
                         modifier = Modifier.size(14.dp),
                         strokeWidth = 1.8.dp,
-                        color = Color(0xFF3B82F6),
+                        color = MaterialTheme.colorScheme.primary,
                     )
                 }
                 if (!selectionMode) {

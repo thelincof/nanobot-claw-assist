@@ -1,5 +1,6 @@
 package com.nanobot.client.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -492,49 +493,69 @@ private fun CalendarView(
     }
     val cells = AutomationCalendar.monthGrid(month)
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "${monthName(month.monthNumber)} ${month.year}",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f),
-            )
-            OutlinedButton(onClick = { month = LocalDate(today.year, today.month, 1) }) {
-                Text(stringResource(Res.string.automations_today))
-            }
-            Spacer(Modifier.width(4.dp))
-            IconButton(onClick = { month = month.minus(1, DateTimeUnit.MONTH) }) {
-                Icon(Icons.Rounded.ChevronLeft, contentDescription = stringResource(Res.string.automations_prev_month))
-            }
-            IconButton(onClick = { month = month.plus(1, DateTimeUnit.MONTH) }) {
-                Icon(Icons.Rounded.ChevronRight, contentDescription = stringResource(Res.string.automations_next_month))
-            }
-        }
-        Spacer(Modifier.height(6.dp))
-        Row(Modifier.fillMaxWidth()) {
-            weekdayLabels().forEach { label ->
-                Text(
-                    label,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f).padding(horizontal = 2.dp),
-                )
-            }
-        }
-        Spacer(Modifier.height(4.dp))
-        cells.chunked(7).forEach { week ->
-            Row(Modifier.fillMaxWidth()) {
-                week.forEach { date ->
-                    DayCell(
-                        date = date,
-                        inMonth = date.month == month.month,
-                        isToday = date == today,
-                        entries = byDate[date].orEmpty(),
-                        darkTheme = darkTheme,
-                        modifier = Modifier.weight(1f),
-                        onOpenDay = onOpenDay,
-                    )
+    Box(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)),
+            shadowElevation = 2.dp,
+            modifier = Modifier.fillMaxWidth().widthIn(max = 780.dp),
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "${monthName(month.monthNumber)} ${month.year}",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            stringResource(Res.string.automations_calendar),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    OutlinedButton(onClick = { month = LocalDate(today.year, today.month, 1) }) {
+                        Text(stringResource(Res.string.automations_today))
+                    }
+                    Spacer(Modifier.width(4.dp))
+                    IconButton(onClick = { month = month.minus(1, DateTimeUnit.MONTH) }) {
+                        Icon(Icons.Rounded.ChevronLeft, contentDescription = stringResource(Res.string.automations_prev_month))
+                    }
+                    IconButton(onClick = { month = month.plus(1, DateTimeUnit.MONTH) }) {
+                        Icon(Icons.Rounded.ChevronRight, contentDescription = stringResource(Res.string.automations_next_month))
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    weekdayLabels().forEach { label ->
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.weight(1f).padding(horizontal = 2.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                cells.chunked(7).forEach { week ->
+                    Row(Modifier.fillMaxWidth()) {
+                        week.forEach { date ->
+                            DayCell(
+                                date = date,
+                                inMonth = date.month == month.month,
+                                isToday = date == today,
+                                entries = byDate[date].orEmpty(),
+                                darkTheme = darkTheme,
+                                modifier = Modifier.weight(1f),
+                                onOpenDay = onOpenDay,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -554,21 +575,24 @@ private fun DayCell(
     val groups = entries.groupBy { it.job.id }.values.toList()
     Column(
         modifier
-            .heightIn(min = 62.dp)
-            .padding(2.dp)
+            .heightIn(min = 72.dp)
+            .padding(3.dp)
             .background(
-                if (inMonth) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f)
-                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.05f),
-                RoundedCornerShape(6.dp),
+                when {
+                    isToday -> MaterialTheme.colorScheme.primaryContainer
+                    inMonth -> MaterialTheme.colorScheme.surfaceContainerLow
+                    else -> Color.Transparent
+                },
+                RoundedCornerShape(10.dp),
             )
             .clickable(enabled = entries.isNotEmpty()) { onOpenDay(date, entries) }
-            .padding(4.dp),
+            .padding(6.dp),
     ) {
         Text(
             date.dayOfMonth.toString(),
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelMedium,
             color = when {
-                isToday -> MaterialTheme.colorScheme.primary
+                isToday -> MaterialTheme.colorScheme.onPrimaryContainer
                 inMonth -> MaterialTheme.colorScheme.onSurface
                 else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
             },
