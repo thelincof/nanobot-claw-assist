@@ -118,7 +118,7 @@ compose.desktop {
             linux {
                 iconFile.set(project.file("icons/nanobot.png"))
                 appCategory = "Network"
-                appRelease = "3"
+                appRelease = "4"
                 debMaintainer = "52803015+thelincof@users.noreply.github.com"
             }
         }
