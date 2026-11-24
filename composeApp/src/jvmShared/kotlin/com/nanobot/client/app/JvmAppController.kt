@@ -104,6 +104,7 @@ class JvmAppController(
     private var assistantPending = false
     private var assistantForceListen = false
     private var pendingTurnId: String? = null
+    private var pendingTurnChatId: String? = null
 
     init {
         scope.launch {
@@ -619,6 +620,7 @@ class JvmAppController(
         transient.clear()
         optimistic.clear()
         completedTurns.clear()
+        clearPendingTurn()
         cachedThread?.completedTurnIds?.let { completedTurns.addAll(it) }
         loadGeneration++
         noteTurnActivity()
@@ -732,7 +734,7 @@ class JvmAppController(
             delay(3_000)
             if (mutableState.value.stopping) {
                 clearStreamingFlags()
-                pendingTurnId = null
+                clearPendingTurn()
                 update {
                     it.copy(
                         stopping = false,
@@ -1443,7 +1445,7 @@ class JvmAppController(
             val chatId = gateway.transport().newChat(workspaceScope = workspaceScope())
             val key = "websocket:$chatId"
             currentChatId = chatId
-            pendingTurnId = null
+            clearPendingTurn()
             canonical = emptyList()
             canonicalEvents = emptyList()
             historyCursorInitialized = false
@@ -1522,6 +1524,7 @@ class JvmAppController(
         )
         optimistic[turnId] = userMessage
         pendingTurnId = turnId
+        pendingTurnChatId = chatId
         noteTurnActivity()
         update {
             it.copy(
@@ -1547,17 +1550,27 @@ class JvmAppController(
                     )
                 },
             )
-            update { it.copy(sending = false, activeTurnId = turnId) }
+            if (currentChatId == chatId) {
+                update {
+                    it.copy(
+                        sending = false,
+                        awaitingFirstToken = false,
+                        activeTurnId = turnId,
+                    )
+                }
+            }
         } catch (error: Exception) {
-            if (pendingTurnId == turnId) pendingTurnId = null
-            optimistic[turnId] = userMessage.copy(failed = true)
-            update {
-                it.copy(
-                    messages = project(),
-                    sending = false,
-                    awaitingFirstToken = false,
-                    error = friendlyError(error.message),
-                )
+            if (pendingTurnId == turnId) clearPendingTurn()
+            if (currentChatId == chatId) {
+                optimistic[turnId] = userMessage.copy(failed = true)
+                update {
+                    it.copy(
+                        messages = project(),
+                        sending = false,
+                        awaitingFirstToken = false,
+                        error = friendlyError(error.message),
+                    )
+                }
             }
         }
     }
@@ -1566,6 +1579,11 @@ class JvmAppController(
         val state = mutableState.value
         return state.sending || state.awaitingFirstToken ||
             state.activeTurnId != null || state.stopping
+    }
+
+    private fun clearPendingTurn() {
+        pendingTurnId = null
+        pendingTurnChatId = null
     }
 
     private fun clearStreamingFlags() {
@@ -1578,7 +1596,7 @@ class JvmAppController(
 
     private fun clearChatState() {
         currentChatId = null
-        pendingTurnId = null
+        clearPendingTurn()
         canonical = emptyList()
         canonicalEvents = emptyList()
         historyCursorInitialized = false
@@ -1688,13 +1706,14 @@ class JvmAppController(
                     transient.clear()
                 }
             }
-            val localTurnInFlight = pendingTurnId != null ||
+            val pendingForChat = pendingTurnId.takeIf { pendingTurnChatId == chatId }
+            val localTurnInFlight = pendingForChat != null ||
                 mutableState.value.sending ||
                 mutableState.value.awaitingFirstToken ||
                 transient.values.any { it.isStreaming || it.reasoningStreaming }
             val activeTurn = payload.activeTurnId
                 ?: mutableState.value.activeTurnId.takeIf { localTurnInFlight }
-                ?: pendingTurnId
+                ?: pendingForChat
             update {
                 it.copy(
                     messages = project(),
@@ -1707,7 +1726,7 @@ class JvmAppController(
                     // A server snapshot may briefly report active_turn_id=null
                     // while a locally started turn is still being accepted.
                     awaitingFirstToken = activeTurn != null &&
-                        (it.awaitingFirstToken || pendingTurnId != null),
+                        (it.awaitingFirstToken || pendingForChat != null),
                 )
             }
         } catch (error: CancellationException) {
@@ -1941,7 +1960,7 @@ class JvmAppController(
                 val chatId = event.value.chatId
                 if (chatId == null || matches(chatId)) {
                     clearStreamingFlags()
-                    pendingTurnId = null
+                    clearPendingTurn()
                     update {
                         it.copy(
                             error = event.value.detail ?: event.value.reason ?: "Ошибка gateway",
@@ -1959,7 +1978,8 @@ class JvmAppController(
     }
 
     private fun markStreamStarted(turnId: String? = null) {
-        val active = mutableState.value.activeTurnId ?: turnId ?: pendingTurnId
+        val pendingForChat = pendingTurnId.takeIf { pendingTurnChatId == currentChatId }
+        val active = mutableState.value.activeTurnId ?: turnId ?: pendingForChat
         if (mutableState.value.awaitingFirstToken || mutableState.value.sending || active != null) {
             update {
                 it.copy(
@@ -2103,7 +2123,7 @@ class JvmAppController(
         }
         // A turn finished: nothing may remain in a "streaming" visual state.
         clearStreamingFlags()
-        pendingTurnId = null
+        clearPendingTurn()
         val turnId = event.turnId
         if (turnId != null) completedTurns.add(turnId)
         val finalText = message?.content?.takeIf { it.isNotBlank() }

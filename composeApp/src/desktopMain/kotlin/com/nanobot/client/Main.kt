@@ -15,6 +15,7 @@ import org.jetbrains.compose.resources.painterResource
 
 fun main(args: Array<String>) {
     installCrashHandler()
+    configureRendering()
     val assistant = args.any { it == "--assistant" || it == "--listen" }
     if (!DesktopSingleInstance.acquire()) {
         if (assistant) DesktopSingleInstance.forwardAssistantTrigger()
@@ -23,6 +24,17 @@ fun main(args: Array<String>) {
     DesktopSingleInstance.watchForAssistantTriggers { AssistantLaunch.trigger() }
     if (assistant) AssistantLaunch.trigger()
     runApp()
+}
+
+private fun configureRendering() {
+    // Skiko on X11 can redraw in a tight loop when the compositor does not
+    // provide a vsync signal. Keep frame pacing explicit so an idle window does
+    // not burn a CPU core.
+    if (System.getProperty("os.name").lowercase().contains("linux")) {
+        System.setProperty("skiko.vsync.enabled", "true")
+        System.setProperty("skiko.rendering.linux.waitForFrameVsyncOnRedrawImmediately", "true")
+        System.setProperty("skiko.vsync.framelimit.fallback.enabled", "true")
+    }
 }
 
 private fun installCrashHandler() {
