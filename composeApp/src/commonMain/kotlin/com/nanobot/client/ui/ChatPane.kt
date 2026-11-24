@@ -57,6 +57,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -403,6 +404,8 @@ private fun MessageList(controller: AppController, state: AppState) {
     var pendingHistoryAnchor by remember(state.chatId) {
         mutableStateOf<Pair<String, Int>?>(null)
     }
+    var followBottom by remember(state.chatId) { mutableStateOf(true) }
+    var autoScrolling by remember(state.chatId) { mutableStateOf(false) }
     val messages = state.messages
     val currentTurnVisible = state.activeTurnId?.let { turnId ->
         messages.any { message ->
@@ -417,18 +420,49 @@ private fun MessageList(controller: AppController, state: AppState) {
     // "at the last index" is not the same as being at the bottom; otherwise a
     // stream update yanks the list back to that item's header.
     val atBottom by remember(messages.size, showPending) {
-        derivedStateOf {
-            val info = listState.layoutInfo
-            val lastVisible = info.visibleItemsInfo.lastOrNull()
-                ?: return@derivedStateOf true
-            lastVisible.index >= info.totalItemsCount - 1 &&
-                lastVisible.offset + lastVisible.size <= info.viewportEndOffset + 4
+        derivedStateOf { listState.isAtActualBottom() }
+    }
+
+    suspend fun scrollToNewest(animate: Boolean) {
+        autoScrolling = true
+        followBottom = true
+        try {
+            if (animate) {
+                listState.animateToBottom(bottomIndex)
+            } else {
+                listState.scrollToBottom(bottomIndex)
+            }
+        } finally {
+            autoScrolling = false
         }
     }
 
     LaunchedEffect(state.chatId, state.messagesLoading) {
-        if (!state.messagesLoading && messages.isNotEmpty()) {
-            listState.scrollToBottom(bottomIndex)
+        if (!state.messagesLoading) {
+            if (messages.isNotEmpty()) {
+                scrollToNewest(animate = false)
+            } else {
+                followBottom = true
+            }
+        }
+    }
+    LaunchedEffect(listState, state.chatId) {
+        snapshotFlow {
+            Triple(
+                listState.isScrollInProgress,
+                listState.firstVisibleItemIndex,
+                listState.firstVisibleItemScrollOffset,
+            )
+        }.collect { (scrolling, _, _) ->
+            if (autoScrolling) return@collect
+            // As soon as the user starts dragging/wheeling, stop following.
+            // Re-enable follow only after they actually settle at the bottom;
+            // otherwise keep the current intent (a cancelled auto-scroll must
+            // not disable following).
+            when {
+                scrolling -> followBottom = false
+                listState.isAtActualBottom() -> followBottom = true
+            }
         }
     }
     LaunchedEffect(
@@ -467,8 +501,8 @@ private fun MessageList(controller: AppController, state: AppState) {
         state.awaitingFirstToken,
         showPending,
     ) {
-        if (last != null && atBottom && bottomIndex >= 0) {
-            listState.animateToBottom(bottomIndex)
+        if (last != null && followBottom && bottomIndex >= 0) {
+            scrollToNewest(animate = true)
         }
     }
 
@@ -508,7 +542,7 @@ private fun MessageList(controller: AppController, state: AppState) {
         }
         if (!atBottom && messages.isNotEmpty()) {
             SmallFloatingActionButton(
-                onClick = { scope.launch { listState.animateToBottom(bottomIndex) } },
+                onClick = { scope.launch { scrollToNewest(animate = true) } },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
             ) {
                 Icon(Icons.Rounded.ArrowDownward, contentDescription = null)
@@ -539,6 +573,13 @@ private fun HistoryLoaderRow(loading: Boolean, onLoad: () -> Unit) {
             }
         }
     }
+}
+
+private fun LazyListState.isAtActualBottom(thresholdPx: Int = 24): Boolean {
+    val info = layoutInfo
+    val lastVisible = info.visibleItemsInfo.lastOrNull() ?: return true
+    return lastVisible.index >= info.totalItemsCount - 1 &&
+        lastVisible.offset + lastVisible.size <= info.viewportEndOffset + thresholdPx
 }
 
 private suspend fun LazyListState.scrollToBottom(index: Int) {

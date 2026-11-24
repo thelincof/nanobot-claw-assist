@@ -105,6 +105,7 @@ class JvmAppController(
     private var assistantForceListen = false
     private var pendingTurnId: String? = null
     private var pendingTurnChatId: String? = null
+    private var sendInFlight = false
 
     init {
         scope.launch {
@@ -707,14 +708,34 @@ class JvmAppController(
             update { it.copy(error = "Нет подключения к gateway") }
             return
         }
+        val state = mutableState.value
+        if (sendInFlight || state.sending || state.awaitingFirstToken ||
+            state.activeTurnId != null || state.stopping
+        ) {
+            logD(
+                "send: ignored duplicate chat=${currentChatId.orEmpty()} " +
+                    "inFlight=$sendInFlight sending=${state.sending} awaiting=${state.awaitingFirstToken} " +
+                    "active=${state.activeTurnId != null}",
+            )
+            return
+        }
         val validation = validateAttachments(attachments)
         if (validation != null) {
             update { it.copy(error = validation) }
             return
         }
+        sendInFlight = true
+        logD(
+            "send: request chat=${currentChatId.orEmpty()} chars=${content.length} " +
+                "hash=${content.hashCode()} attachments=${attachments.size}",
+        )
         scope.launch {
-            val chatId = ensureChat() ?: return@launch
-            sendInternal(chatId, content, attachments)
+            try {
+                val chatId = ensureChat() ?: return@launch
+                sendInternal(chatId, content, attachments)
+            } finally {
+                sendInFlight = false
+            }
         }
     }
 
@@ -1506,7 +1527,13 @@ class JvmAppController(
         text: String,
         attachments: List<LocalAttachment> = emptyList(),
     ) {
+        val state = mutableState.value
+        if (state.sending || state.awaitingFirstToken || state.activeTurnId != null) {
+            logD("send: internal duplicate ignored chat=$chatId active=${state.activeTurnId != null}")
+            return
+        }
         val turnId = UUID.randomUUID().toString()
+        logD("send: dispatch chat=$chatId turn=$turnId chars=${text.length} hash=${text.hashCode()}")
         val userMessage = UiMessage(
             id = "u-$turnId",
             role = "user",
@@ -2080,6 +2107,10 @@ class JvmAppController(
         // Backend does not publish turn_end for /stop-cancelled turns; the reply
         // message ("Stopped N task(s).") is the only stop acknowledgement.
         if (mutableState.value.stopping && kind == null && text.isNotBlank()) {
+            logD(
+                "stop: ack chat=${event.chatId.orEmpty()} text=${text.trim().take(120)} " +
+                    "active=${mutableState.value.activeTurnId.orEmpty()}",
+            )
             update {
                 it.copy(
                     messages = project(),
